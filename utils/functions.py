@@ -452,31 +452,21 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
     ax3.set_xticklabels(['WV1', 'WV2'])
     ax3.set_ylabel('Power')
     ax3.set_title('Band0 (Low k) Distribution')
+    ax3.set_yscale("log")
 
     # Band 1
-    ax4 = fig.add_subplot(gs[1, 1])
+    ax4 = fig.add_subplot(gs[1, 1], sharey=ax3)
     sns.boxplot(data=[df_wv1['mean_psd_band1'].dropna(), df_wv2['mean_psd_band1'].dropna()], ax=ax4, showfliers=False)
     ax4.set_xticklabels(['WV1', 'WV2'])
     ax4.set_ylabel('Power')
     ax4.set_title('Band1 (Medium k) Distribution')
 
     # Band 2
-    ax5 = fig.add_subplot(gs[1, 2])
+    ax5 = fig.add_subplot(gs[1, 2], sharey=ax3)
     sns.boxplot(data=[df_wv1['mean_psd_band2'].dropna(), df_wv2['mean_psd_band2'].dropna()], ax=ax5, showfliers=False)
     ax5.set_xticklabels(['WV1', 'WV2'])
     ax5.set_ylabel('Power')
     ax5.set_title('Band2 (High k) Distribution')
-
-    # Add median values as text annotations to the boxplots
-    for i, ax in enumerate([ax3, ax4, ax5]):
-        band = band_columns[i]
-        wv1_median = np.median(df_wv1[band].dropna())
-        wv2_median = np.median(df_wv2[band].dropna())
-        
-        # ax.text(0, wv1_median*1.1, f'Median: {wv1_median:.2f}', 
-        #         ha='center', va='bottom', fontsize=9, color='blue')
-        # ax.text(1, wv2_median*1.1, f'Median: {wv2_median:.2f}', 
-        #         ha='center', va='bottom', fontsize=9, color='orange')
 
     # 4. Scale dependence visualization: Band ratios (both log and linear scales)
     ax6 = fig.add_subplot(gs[2, 0])
@@ -510,26 +500,6 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
 
     # 5. Focus on Band1/Band2 ratios only (much smaller values)
     ax7 = fig.add_subplot(gs[2, 1])
-    b12_labels = ['WV1\nBand1/Band2', 'WV2\nBand1/Band2']
-    b12_x = np.arange(len(b12_labels))
-    b12_values = [wv1_ratio_12, wv2_ratio_12]
-
-    bars_b12 = ax7.bar(b12_x, b12_values, alpha=0.7, 
-                    color=['blue', 'orange'])
-
-    ax7.set_xticks(b12_x)
-    ax7.set_xticklabels(b12_labels)
-    ax7.set_ylabel('Ratio of Medians')
-    ax7.set_title('Focus on Band1/Band2 Ratios\n(Linear Scale)')
-
-    # Add ratio values as text
-    for i, bar in enumerate(bars_b12):
-        height = bar.get_height()
-        ax7.text(bar.get_x() + bar.get_width()/2., height*1.05,
-                f'{b12_values[i]:.2f}', ha='center', va='bottom')
-
-    # 6. Violin plot showing distribution of band ratios (clipped for visibility)
-    ax8 = fig.add_subplot(gs[2, 2])
 
     # Gather ratio data (element-wise for violin plots)
     wv1_ratios_01 = df_wv1['mean_psd_band0'] / df_wv1['mean_psd_band1']
@@ -571,27 +541,22 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
         clip_upper = np.percentile(ratio_data.loc[mask, 'Ratio'], 95)
         ratio_data.loc[mask, 'Ratio'] = np.clip(ratio_data.loc[mask, 'Ratio'], 0, clip_upper)
 
-    # Replace from line 467 (after setting ax8 = fig.add_subplot(gs[2, 2])) with:
+    # Band0/Band1 plot
+    sns.violinplot(x='Dataset', y='Ratio', data=ratio_data[ratio_data['Type'] == 'Band0/Band1'], 
+                ax=ax7, palette=['blue', 'orange'])
+    ax7.set_title('Band0/Band1 Ratios')
+    ax7.set_ylabel('Ratio Value')
 
     # 6. Violin plots for ratio distributions in the main figure
     ax8 = fig.add_subplot(gs[2, 2])
 
-    # Band0/Band1 plot
-    sns.violinplot(x='Dataset', y='Ratio', data=ratio_data[ratio_data['Type'] == 'Band0/Band1'], 
+    sns.violinplot(x='Dataset', y='Ratio', data=ratio_data[ratio_data['Type'] == 'Band1/Band2'], 
                 ax=ax8, palette=['blue', 'orange'])
-    ax8.set_title('Band0/Band1 Ratios')
+    ax8.set_title('Band1/Band2 Ratios')
     ax8.set_ylabel('Ratio Value')
 
-    # Create an additional subplot for Band1/Band2 ratios
-    # We'll place it to the right of ax8
-    ax9 = plt.axes([0.78, 0.11, 0.2, 0.2])  # [left, bottom, width, height]
-    sns.violinplot(x='Dataset', y='Ratio', data=ratio_data[ratio_data['Type'] == 'Band1/Band2'], 
-                ax=ax9, palette=['blue', 'orange'])
-    ax9.set_title('Band1/Band2 Ratios')
-    ax9.set_ylabel('Ratio Value')
-
     # Add median values as text
-    for i, (ratio_type, ax) in enumerate([('Band0/Band1', ax8), ('Band1/Band2', ax9)]):
+    for i, (ratio_type, ax) in enumerate([('Band0/Band1', ax7), ('Band1/Band2', ax8)]):
         for j, dataset in enumerate(['WV1', 'WV2']):
             filtered_data = ratio_data[(ratio_data['Type'] == ratio_type) & (ratio_data['Dataset'] == dataset)]
             median_val = np.median(filtered_data['Ratio'])
@@ -610,11 +575,6 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
     plt.tight_layout(rect=[0, 0.03, 1, 0.97])
     plt.savefig('images/scale_dependence_median_analysis.png', dpi=300)
 
-    # Remove the code that creates the second figure (lines ~477-505)
-    # Delete from "# Create two separate plots for each ratio type" through "plt.savefig('band_ratio_distributions.png', dpi=300)"
-
-    
-    
     # 6. Create summary DataFrame 
     print("\nCreating summary tables...")
     
