@@ -7,27 +7,14 @@ from scipy.stats import ttest_ind, levene, ks_2samp, shapiro, bartlett, f_oneway
 from statsmodels.stats.multitest import multipletests
 
 def check_normality(data, alpha=0.01):
-    """
-    Test normality of data using Shapiro-Wilk test
+    """Test normality of data using Shapiro-Wilk test"""
+    # Subsample if data is too large (Shapiro-Wilk limit is 5000)
+    if len(data) > 5000:
+        np.random.seed(42)  # for reproducibility
+        data = np.random.choice(data, size=5000, replace=False)
     
-    Parameters:
-    -----------
-    data : array-like
-        Data to test
-    alpha : float
-        Significance level
-    
-    Returns:
-    --------
-    bool
-        True if data appears normally distributed
-    dict
-        Test results
-    """
-    # Shapiro-Wilk test (most powerful normality test)
     stat, p_value = shapiro(data)
     
-    # QQ plot data for visualization
     qq_x = np.linspace(0, 1, len(data))
     qq_y = np.sort(data)
     
@@ -230,28 +217,36 @@ def adjust_pvalues(p_values, method='bonferroni'):
     """
     return multipletests(p_values, method=method)[1]
 
+def bootstrap_ratio_confidence_intervals(data1, data2, n_bootstrap=1000, confidence=0.99):
+    """Calculate bootstrap confidence intervals for the ratio of medians"""
+    bootstrap_ratios = []
+    
+    for _ in range(n_bootstrap):
+        # Resample both datasets
+        sample1 = np.random.choice(data1, size=len(data1), replace=True)
+        sample2 = np.random.choice(data2, size=len(data2), replace=True)
+        # Calculate ratio of medians
+        ratio = np.median(sample1) / np.median(sample2)
+        bootstrap_ratios.append(ratio)
+    
+    lower_quantile = (1 - confidence) / 2
+    upper_quantile = 1 - lower_quantile
+    
+    return (np.quantile(bootstrap_ratios, lower_quantile),
+            np.quantile(bootstrap_ratios, upper_quantile))
+
 # Main analysis function
 def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=0.99, alpha=0.01):
     """
     Comprehensive analysis of scale dependence using median-based methods
-    
-    Parameters:
-    -----------
-    df_wv1, df_wv2 : pandas.DataFrame
-        DataFrames containing band data for WV1 and WV2
-    bootstrap_samples : int
-        Number of bootstrap samples
-    confidence : float
-        Confidence level for bootstrap intervals
-    alpha : float
-        Significance level for hypothesis tests
-    
-    Returns:
-    --------
-    dict
-        Dictionary with complete analysis results
     """
-    print("Performing comprehensive scale dependence analysis using median-based methods...")
+    print("\n" + "="*80)
+    print("SCALE DEPENDENCE ANALYSIS")
+    print("="*80)
+    print(f"\nAnalysis Parameters:")
+    print(f"- Bootstrap Samples: {bootstrap_samples}")
+    print(f"- Confidence Level: {confidence*100}%")
+    print(f"- Significance Level (alpha): {alpha}")
     
     # Define band columns and pairs for comparison
     band_columns = ['mean_psd_band0', 'mean_psd_band1', 'mean_psd_band2']
@@ -268,9 +263,20 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
     }
     
     # 1. Normality check and visualization
-    print("\nChecking normality of distributions...")
+    print("\n" + "-"*80)
+    print("STEP 1: NORMALITY ASSESSMENT")
+    print("-"*80)
     
-    # Create QQ plots for visual inspection of normality
+    for dataset_name, df in [('WV1', df_wv1), ('WV2', df_wv2)]:
+        print(f"\n{dataset_name} Normality Results:")
+        for band in band_columns:
+            data = df[band].dropna().values
+            is_normal, norm_test = check_normality(data)
+            print(f"  {band}:")
+            print(f"    Normal: {is_normal}")
+            print(f"    Shapiro-Wilk p-value: {norm_test['p_value']:.2e}")
+    
+    print("\nGenerating QQ plots for visual inspection...")
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     fig.suptitle('QQ Plots for Normality Assessment', fontsize=16)
     
@@ -278,70 +284,117 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
         for j, band in enumerate(band_columns):
             data = df[band].dropna().values
             is_normal, norm_test = check_normality(data)
-            
-            # Plot QQ plot
             ax = axes[i, j]
             stats.probplot(data, dist="norm", plot=ax)
             ax.set_title(f"{dataset_name} - {band}\nNormal: {is_normal}")
     
     plt.tight_layout(rect=[0, 0, 1, 0.95])
     plt.savefig('images/normality_qq_plots.png', dpi=300)
+    print("QQ plots saved as 'normality_qq_plots.png'")
     
-    # 2. Bootstrap confidence intervals for medians
-    print("\nComputing bootstrap confidence intervals for medians...")
+    # 2. Bootstrap confidence intervals
+    print("\n" + "-"*80)
+    print("STEP 2: BOOTSTRAP ANALYSIS")
+    print("-"*80)
+    print(f"Computing {confidence*100}% confidence intervals using {bootstrap_samples} resamples\n")
     
     for dataset_name, df in [('WV1', df_wv1), ('WV2', df_wv2)]:
+        print(f"\n{dataset_name} Bootstrap Results:")
         for band in band_columns:
             valid_data = df[band].dropna().values
             results[dataset_name]['bootstrap'][band] = bootstrap_confidence_intervals(
                 valid_data, n_bootstrap=bootstrap_samples, confidence=confidence
             )
+            ci = results[dataset_name]['bootstrap'][band]
+            print(f"\n  {band}:")
+            print(f"    Median CI: [{ci['median'][0]:.2f}, {ci['median'][1]:.2f}]")
+            print(f"    IQR CI: [{ci['iqr'][0]:.2f}, {ci['iqr'][1]:.2f}]")
+            print(f"    Skewness CI: [{ci['skewness'][0]:.2f}, {ci['skewness'][1]:.2f}]")
     
     # 3. Omnibus tests
-    print("\nPerforming omnibus tests across all bands...")
+    print("\n" + "-"*80)
+    print("STEP 3: OMNIBUS TESTS")
+    print("-"*80)
+    print("Testing for any differences among bands")
     
     for dataset_name, df in [('WV1', df_wv1), ('WV2', df_wv2)]:
         results[dataset_name]['omnibus'] = perform_omnibus_tests(df, band_columns, alpha=alpha)
         
         is_significant = results[dataset_name]['omnibus']['significant']
         test_name = results[dataset_name]['omnibus']['test']
+        statistic = results[dataset_name]['omnibus']['statistic']
         p_value = results[dataset_name]['omnibus']['p_value']
         
-        print(f"  {dataset_name} - {test_name}: p-value = {p_value:.2e} "
-              f"({'SIGNIFICANT' if is_significant else 'not significant'})")
+        print(f"\n{dataset_name} Results:")
+        print(f"  Test: {test_name}")
+        print(f"  Statistic: {statistic:.2f}")
+        print(f"  p-value: {p_value:.2e}")
+        print(f"  Conclusion: {'Significant differences exist' if is_significant else 'No significant differences'}")
     
-    # 4. Pairwise tests (only if omnibus test is significant)
-    print("\nPerforming pairwise comparisons between bands...")
+    # 4. Pairwise tests
+    print("\n" + "-"*80)
+    print("STEP 4: PAIRWISE COMPARISONS")
+    print("-"*80)
     
     for dataset_name, df in [('WV1', df_wv1), ('WV2', df_wv2)]:
-        if results[dataset_name]['omnibus']['significant']:
-            # Collect p-values for adjustment
-            first_moment_pvalues = []
-            second_moment_pvalues = []
-            distribution_pvalues = []
+        print(f"\n{dataset_name} Pairwise Results:")
+        if not results[dataset_name]['omnibus']['significant']:
+            print("  Skipping (omnibus test not significant)")
+            continue
             
-            # Perform pairwise tests
-            for band1, band2 in band_pairs:
-                test_result = test_scale_dependence(df, band1, band2, alpha=alpha)
-                results[dataset_name]['pairwise'][(band1, band2)] = test_result
-                
-                first_moment_pvalues.append(test_result['first_moment']['p_value'])
-                second_moment_pvalues.append(test_result['second_moment']['p_value'])
-                distribution_pvalues.append(test_result['distribution']['p_value'])
+        first_moment_pvalues = []
+        second_moment_pvalues = []
+        distribution_pvalues = []
+        
+        for band1, band2 in band_pairs:
+            print(f"\n  Comparing {band1} vs {band2}:")
+            test_result = test_scale_dependence(df, band1, band2, alpha=alpha)
+            results[dataset_name]['pairwise'][(band1, band2)] = test_result
             
-            # Adjust p-values for multiple comparisons
-            adjusted_first = adjust_pvalues(first_moment_pvalues)
-            adjusted_second = adjust_pvalues(second_moment_pvalues)
-            adjusted_distribution = adjust_pvalues(distribution_pvalues)
+            # Collect p-values
+            first_moment_pvalues.append(test_result['first_moment']['p_value'])
+            second_moment_pvalues.append(test_result['second_moment']['p_value'])
+            distribution_pvalues.append(test_result['distribution']['p_value'])
             
-            # Store adjusted p-values
-            for i, (band1, band2) in enumerate(band_pairs):
-                results[dataset_name]['pairwise'][(band1, band2)]['first_moment']['adjusted_p_value'] = adjusted_first[i]
-                results[dataset_name]['pairwise'][(band1, band2)]['second_moment']['adjusted_p_value'] = adjusted_second[i]
-                results[dataset_name]['pairwise'][(band1, band2)]['distribution']['adjusted_p_value'] = adjusted_distribution[i]
+            # Print detailed results
+            print(f"    Mann-Whitney U test:")
+            print(f"      Statistic: {test_result['first_moment']['statistic']:.2f}")
+            print(f"      p-value: {test_result['first_moment']['p_value']:.2e}")
+            
+            print(f"    Mood's Median test:")
+            print(f"      Statistic: {test_result['second_moment']['statistic']:.2f}")
+            print(f"      p-value: {test_result['second_moment']['p_value']:.2e}")
+            
+            print(f"    KS test:")
+            print(f"      Statistic: {test_result['distribution']['statistic']:.2f}")
+            print(f"      p-value: {test_result['distribution']['p_value']:.2e}")
+        
+        # Adjust p-values
+        print("\n  Bonferroni-adjusted p-values:")
+        adjusted_first = adjust_pvalues(first_moment_pvalues)
+        adjusted_second = adjust_pvalues(second_moment_pvalues)
+        adjusted_distribution = adjust_pvalues(distribution_pvalues)
+        
+        for i, (band1, band2) in enumerate(band_pairs):
+            results[dataset_name]['pairwise'][(band1, band2)]['first_moment']['adjusted_p_value'] = adjusted_first[i]
+            results[dataset_name]['pairwise'][(band1, band2)]['second_moment']['adjusted_p_value'] = adjusted_second[i]
+            results[dataset_name]['pairwise'][(band1, band2)]['distribution']['adjusted_p_value'] = adjusted_distribution[i]
+            
+            print(f"    {band1} vs {band2}:")
+            print(f"      Mann-Whitney: {adjusted_first[i]:.2e}")
+            print(f"      Mood's Median: {adjusted_second[i]:.2e}")
+            print(f"      KS test: {adjusted_distribution[i]:.2e}")
     
-    # 5. Create visualization
-    print("\nGenerating visualizations...")
+    # 5. Visualization
+    print("\n" + "-"*80)
+    print("STEP 5: VISUALIZATION")
+    print("-"*80)
+    print("Generating comprehensive visualization plots:")
+    print("1. Median PSD across scales (with bootstrap CIs)")
+    print("2. Zoomed view of Bands 1 & 2")
+    print("3. Distribution boxplots")
+    print("4. Scale dependence ratio analysis")
+    print("5. Ratio distributions")
 
     # Create a larger figure with more subplots
     fig = plt.figure(figsize=(18, 15))
@@ -445,10 +498,11 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
                 f'{height:.2f}', ha='center', va='bottom', fontsize=9)
 
     # 3. Distribution boxplots with separate axes for each band
-    # Create three separate boxplots for each band with their own y-scales
+    
     # Band 0
     ax3 = fig.add_subplot(gs[1, 0])
     sns.boxplot(data=[df_wv1['mean_psd_band0'].dropna(), df_wv2['mean_psd_band0'].dropna()], ax=ax3, showfliers=False)
+    ax3.set_xticks([0, 1])  # Add this line
     ax3.set_xticklabels(['WV1', 'WV2'])
     ax3.set_ylabel('Power')
     ax3.set_title('Band0 (Low k) Distribution')
@@ -457,6 +511,7 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
     # Band 1
     ax4 = fig.add_subplot(gs[1, 1], sharey=ax3)
     sns.boxplot(data=[df_wv1['mean_psd_band1'].dropna(), df_wv2['mean_psd_band1'].dropna()], ax=ax4, showfliers=False)
+    ax4.set_xticks([0, 1])
     ax4.set_xticklabels(['WV1', 'WV2'])
     ax4.set_ylabel('Power')
     ax4.set_title('Band1 (Medium k) Distribution')
@@ -464,6 +519,7 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
     # Band 2
     ax5 = fig.add_subplot(gs[1, 2], sharey=ax3)
     sns.boxplot(data=[df_wv1['mean_psd_band2'].dropna(), df_wv2['mean_psd_band2'].dropna()], ax=ax5, showfliers=False)
+    ax5.set_xticks([0, 1])
     ax5.set_xticklabels(['WV1', 'WV2'])
     ax5.set_ylabel('Power')
     ax5.set_title('Band2 (High k) Distribution')
@@ -497,6 +553,39 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
         height = bar.get_height()
         ax6.text(bar.get_x() + bar.get_width()/2., height*1.1,
                 f'{ratio_values[i]:.1f}', ha='center', va='bottom', rotation=0)
+        
+    # Calculate ratios of medians and their CIs
+    wv1_ratio_01 = np.median(df_wv1['mean_psd_band0'])/np.median(df_wv1['mean_psd_band1'])
+    wv1_ratio_12 = np.median(df_wv1['mean_psd_band1'])/np.median(df_wv1['mean_psd_band2'])
+    wv2_ratio_01 = np.median(df_wv2['mean_psd_band0'])/np.median(df_wv2['mean_psd_band1'])
+    wv2_ratio_12 = np.median(df_wv2['mean_psd_band1'])/np.median(df_wv2['mean_psd_band2'])
+
+    # Calculate CIs for ratios
+    wv1_01_ci = bootstrap_ratio_confidence_intervals(
+        df_wv1['mean_psd_band0'].dropna(),
+        df_wv1['mean_psd_band1'].dropna()
+    )
+    wv1_12_ci = bootstrap_ratio_confidence_intervals(
+        df_wv1['mean_psd_band1'].dropna(),
+        df_wv1['mean_psd_band2'].dropna()
+    )
+    wv2_01_ci = bootstrap_ratio_confidence_intervals(
+        df_wv2['mean_psd_band0'].dropna(),
+        df_wv2['mean_psd_band1'].dropna()
+    )
+    wv2_12_ci = bootstrap_ratio_confidence_intervals(
+        df_wv2['mean_psd_band1'].dropna(),
+        df_wv2['mean_psd_band2'].dropna()
+    )
+
+    ratio_values = [wv1_ratio_01, wv1_ratio_12, wv2_ratio_01, wv2_ratio_12]
+    ratio_cis = [wv1_01_ci, wv1_12_ci, wv2_01_ci, wv2_12_ci]
+
+    # Add error bars to the ratio plot
+    ax6.errorbar(ratio_x, ratio_values,
+                yerr=[[r - ci[0] for r, ci in zip(ratio_values, ratio_cis)],
+                    [ci[1] - r for r, ci in zip(ratio_values, ratio_cis)]],
+                fmt='none', color='k', capsize=5)
 
     # 5. Focus on Band1/Band2 ratios only (much smaller values)
     ax7 = fig.add_subplot(gs[2, 1])
@@ -542,16 +631,26 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
         ratio_data.loc[mask, 'Ratio'] = np.clip(ratio_data.loc[mask, 'Ratio'], 0, clip_upper)
 
     # Band0/Band1 plot
-    sns.violinplot(x='Dataset', y='Ratio', data=ratio_data[ratio_data['Type'] == 'Band0/Band1'], 
-                ax=ax7, palette=['blue', 'orange'])
+    sns.violinplot(x='Dataset', y='Ratio', 
+               data=ratio_data[ratio_data['Type'] == 'Band0/Band1'],
+               ax=ax7, 
+               hue='Dataset',
+               legend=False,
+               palette=['blue', 'orange'])
+    
     ax7.set_title('Band0/Band1 Ratios')
     ax7.set_ylabel('Ratio Value')
 
     # 6. Violin plots for ratio distributions in the main figure
     ax8 = fig.add_subplot(gs[2, 2])
 
-    sns.violinplot(x='Dataset', y='Ratio', data=ratio_data[ratio_data['Type'] == 'Band1/Band2'], 
-                ax=ax8, palette=['blue', 'orange'])
+    sns.violinplot(x='Dataset', y='Ratio', 
+               data=ratio_data[ratio_data['Type'] == 'Band1/Band2'],
+               ax=ax8, 
+               hue='Dataset',
+               legend=False, 
+               palette=['blue', 'orange'])
+    
     ax8.set_title('Band1/Band2 Ratios')
     ax8.set_ylabel('Ratio Value')
 
@@ -575,10 +674,13 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
     plt.tight_layout(rect=[0, 0.03, 1, 0.97])
     plt.savefig('images/scale_dependence_median_analysis.png', dpi=300)
 
+    print("\nVisualization saved as 'scale_dependence_median_analysis.png'")
+
+
     # 6. Create summary DataFrame 
-    print("\nCreating summary tables...")
     
     # Prepare summary data
+
     summary_columns = [
         'Comparison', 'Dataset', 'Normality', 'Location Test', 
         'Location p-value', 'Adjusted p-value', 'Scale Test p-value', 
@@ -630,5 +732,28 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
     
     summary_df = pd.DataFrame(summary_data, columns=summary_columns)
     
+    print("\n" + "="*80)
+    print("ANALYSIS SUMMARY")
+    print("="*80)
+    print("\nKey Findings:")
+    for dataset_name, df in [('WV1', df_wv1), ('WV2', df_wv2)]:
+        print(f"\n{dataset_name}:")
+        print("  Scale Ratios (with 99% CIs):")
+        
+        ratio_01 = np.median(df['mean_psd_band0'])/np.median(df['mean_psd_band1'])
+        ratio_12 = np.median(df['mean_psd_band1'])/np.median(df['mean_psd_band2'])
+        
+        ci_01 = bootstrap_ratio_confidence_intervals(
+            df['mean_psd_band0'].dropna(),
+            df['mean_psd_band1'].dropna()
+        )
+        ci_12 = bootstrap_ratio_confidence_intervals(
+            df['mean_psd_band1'].dropna(),
+            df['mean_psd_band2'].dropna()
+        )
+        
+        print(f"    Band0/Band1: {ratio_01:.2f} [{ci_01[0]:.2f}, {ci_01[1]:.2f}]")
+        print(f"    Band1/Band2: {ratio_12:.2f} [{ci_12[0]:.2f}, {ci_12[1]:.2f}]")
+    
+    print("\nDetailed results available in returned DataFrame")
     return results, summary_df
-
