@@ -1,2 +1,5 @@
 /dataframes_w_chen_classes
 /SAR_data
+
+__pycache__/
+*.py[cod]
