@@ -6,7 +6,7 @@ from scipy import stats
 from scipy.stats import ttest_ind, levene, ks_2samp, shapiro, bartlett, f_oneway, kruskal
 from statsmodels.stats.multitest import multipletests
 
-def check_normality(data, alpha=0.05):
+def check_normality(data, alpha=0.01):
     """
     Test normality of data using Shapiro-Wilk test
     
@@ -81,7 +81,7 @@ def bootstrap_confidence_intervals(data, n_bootstrap=1000, confidence=0.99):
                      np.quantile(bootstrap_skews, upper_quantile))
     }
 
-def test_scale_dependence(df, band1_col, band2_col, alpha=0.05):
+def test_scale_dependence(df, band1_col, band2_col, alpha=0.01):
     """
     Test for scale dependence between two frequency bands
     
@@ -168,10 +168,10 @@ def test_scale_dependence(df, band1_col, band2_col, alpha=0.05):
             'statistic': ks_stat,
             'p_value': ks_pvalue,
             'significant': ks_pvalue < alpha
-        }
+        },
     }
 
-def perform_omnibus_tests(df, band_columns, alpha=0.05):
+def perform_omnibus_tests(df, band_columns, alpha=0.01):
     """
     Perform omnibus tests across all bands before pairwise comparisons
     
@@ -231,7 +231,7 @@ def adjust_pvalues(p_values, method='bonferroni'):
     return multipletests(p_values, method=method)[1]
 
 # Main analysis function
-def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=0.99, alpha=0.05):
+def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=0.99, alpha=0.01):
     """
     Comprehensive analysis of scale dependence using median-based methods
     
@@ -307,7 +307,7 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
         test_name = results[dataset_name]['omnibus']['test']
         p_value = results[dataset_name]['omnibus']['p_value']
         
-        print(f"  {dataset_name} - {test_name}: p-value = {p_value:.6f} "
+        print(f"  {dataset_name} - {test_name}: p-value = {p_value:.2e} "
               f"({'SIGNIFICANT' if is_significant else 'not significant'})")
     
     # 4. Pairwise tests (only if omnibus test is significant)
