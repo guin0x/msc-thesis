@@ -66,6 +66,7 @@ def cmod5n_forward(v, phi, theta):
         4.1590,
         1.6930,
     ]
+
     y0 = C[19]
     PN = C[20]
     a = C[19] - (C[19] - 1) / C[20]
@@ -77,7 +78,7 @@ def cmod5n_forward(v, phi, theta):
     cs2_fi = 2.00 * csfi ** 2 - 1.00
 
     x = (theta - thetm) / thethr
-    xx = x ** 2
+    xx = x * x
 
     #  ! B0: FUNCTION OF WIND SPEED AND INCIDENCE ANGLE
     a0 = C[1] + C[2] * x + C[3] * xx + C[4] * x * xx
@@ -153,7 +154,7 @@ def cmod5n_inverse_MonteCarlo(sigma0, phi, theta):
                 ws = v[i]
                 Delta = np.absolute(np.mean((sigma_0 - sigma0_calc) ** 2))
 
-    return ws,wdir
+    return ws, wdir
 
 def cmod5n_inverse(sigma0_obs, phi, incidence, iterations=10):
     """!     ---------
