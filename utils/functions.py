@@ -5,6 +5,8 @@ import numpy as np
 from scipy import stats
 from scipy.stats import ttest_ind, levene, ks_2samp, shapiro, bartlett, f_oneway, kruskal
 from statsmodels.stats.multitest import multipletests
+import xarray as xr
+from utils.cmod5n import *
 
 def check_normality(data, alpha=0.01):
     """Test normality of data using Shapiro-Wilk test"""
@@ -676,7 +678,6 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
 
     print("\nVisualization saved as 'scale_dependence_median_analysis.png'")
 
-
     # 6. Create summary DataFrame 
     
     # Prepare summary data
@@ -757,3 +758,234 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
     
     print("\nDetailed results available in returned DataFrame")
     return results, summary_df
+
+def add_phi_nominal_to_dataset(file_path, wdir_deg_from_north, perturbed_wdir):
+    try:
+        with xr.open_dataset(file_path) as ds:
+            ground_heading = ds.ground_heading.values  # Raw satellite heading
+            
+            # 1. Normalize ground_heading to 0-360°
+            ground_heading = np.mod(ground_heading, 360)
+
+            # 2. Calculate true azimuth look direction (Sentinel-1 right-looking adjustment)
+            azimuth_look = np.mod(ground_heading + 90, 360)
+
+            # 3. Compute phi with both angles in 0-360° convention
+            phi_perturbed = perturbed_wdir - azimuth_look
+            phi_nominal = wdir_deg_from_north - azimuth_look
+
+            # 4. Wrap to [-180°, 180°] 
+            phi_perturbed = ((phi_perturbed + 180) % 360) - 180           
+            phi_nominal = ((phi_nominal + 180) % 360) - 180
+
+            return pd.Series({'phi_nominal_median': np.median(phi_nominal), 
+                              'phi_perturbed_median': np.median(phi_perturbed),
+                              'ground_heading_median': np.median(ground_heading),
+                              'azimuth_look_median': np.median(azimuth_look)})
+    except Exception as e:
+        print(f"Error processing {file_path}: {e}")
+        return pd.Series({'phi_nominal_median': np.nan, 
+                          'phi_perturbed_median': np.nan,
+                          'ground_heading_median': np.nan,
+                          'azimuth_look_median': np.nan})
+
+def perform_cmod_in_dataset(file_path, wdir_deg_from_north, perturbed_wdir, wspd):
+
+    try:
+        with xr.open_dataset(file_path) as ds:
+            
+            true_sigma0 = ds.sigma0[0].values  
+            
+            # remove last row of true_sigma0 if its full of nans
+            last_row_full_of_nans= False
+            if np.all(np.isnan(true_sigma0[-1, :])):
+                last_row_full_of_nans = True
+                true_sigma0 = true_sigma0[:-1, :]
+
+            # remove lat column of true_sigma0 if its full of nans
+            last_column_full_of_nans = False
+            if np.all(np.isnan(true_sigma0[:, -1])):
+                last_column_full_of_nans = True
+                true_sigma0 = true_sigma0[:, :-1]
+
+            # get statistics from true_sigma0
+            true_sigma0_median = np.median(true_sigma0)
+            true_sigma0_row_var = np.var(true_sigma0, axis=1)
+            true_sigma0_column_var = np.var(true_sigma0, axis=0)
+
+            true_sigma0_flatten = true_sigma0.flatten()
+            true_sigma0_skew = stats.skew(true_sigma0_flatten)
+            true_sigma0_kurtosis = stats.kurtosis(true_sigma0_flatten)
+
+            incidence = ds.incidence.values
+            ground_heading = ds.ground_heading.values  # Raw satellite heading
+            
+            # 1. Normalize ground_heading to 0-360°
+            ground_heading = np.mod(ground_heading, 360)
+            
+            if last_row_full_of_nans:
+                incidence = incidence[:-1, :]
+                ground_heading = ground_heading[:-1, :]
+
+            if last_column_full_of_nans:
+                incidence = incidence[:, :-1]
+                ground_heading = ground_heading[:, :-1]
+
+            # 2. Calculate true azimuth look direction (Sentinel-1 right-looking adjustment)
+            azimuth_look = np.mod(ground_heading + 90, 360)
+            
+            # 3. Compute phi with both angles in 0-360° convention
+            phi_perturbed = perturbed_wdir - azimuth_look
+            phi_nominal = wdir_deg_from_north - azimuth_look
+
+            # 4. Wrap to [-180°, 180°] 
+            phi_perturbed = ((phi_perturbed + 180) % 360) - 180           
+            phi_nominal = ((phi_nominal + 180) % 360) - 180
+
+            sigma0_cmod = cmod5n_forward(np.full(phi_perturbed.shape, wspd),
+                                            phi_perturbed,
+                                            incidence
+                                        )
+            # get statistics from sigma0_cmod
+            sigma0_cmod_median = np.median(sigma0_cmod)
+            sigma0_cmod_row_var = np.var(sigma0_cmod, axis=1)
+            sigma0_cmod_column_var = np.var(sigma0_cmod, axis=0)
+
+            sigma0_cmod_flatten = sigma0_cmod.flatten()
+            sigma0_cmod_skew = stats.skew(sigma0_cmod_flatten)
+            sigma0_cmod_kurtosis = stats.kurtosis(sigma0_cmod_flatten)
+             
+                         
+            # Execute CMOD5N inversion
+            wspd_cmod = cmod5n_inverse(sigma0_cmod,
+                                        phi_nominal,
+                                        incidence,
+                                        )
+            
+            
+            # Calculate statistics (handling potential NaN values)
+            wspd_flat = wspd_cmod.flatten()
+            wspd_flat = wspd_flat[~np.isnan(wspd_flat)]  # Remove NaN values for skew and kurtosis
+            
+            wspd_median = np.nanmedian(wspd_cmod)
+            wspd_var = np.nanvar(wspd_cmod)
+            
+            # Handle case where there are insufficient non-NaN values
+            if len(wspd_flat) > 3:  # Need at least a few points for meaningful skew/kurtosis
+                wspd_skewness = stats.skew(wspd_flat)
+                wspd_kurtosis = stats.kurtosis(wspd_flat)
+            else:
+                wspd_skewness = np.nan
+                wspd_kurtosis = np.nan
+                
+            return pd.Series([true_sigma0_median, true_sigma0_row_var, 
+                              true_sigma0_column_var, true_sigma0_skew, 
+                              true_sigma0_kurtosis, sigma0_cmod_median,
+                              sigma0_cmod_row_var, sigma0_cmod_column_var,
+                              sigma0_cmod_skew, sigma0_cmod_kurtosis,
+                              wspd_median, wspd_var, wspd_skewness, wspd_kurtosis])
+                              
+    except Exception as e:
+        print(f"Error processing {file_path}: {str(e)}")
+        return pd.Series([np.nan, np.nan, np.nan, np.nan,
+                          np.nan, np.nan, np.nan, np.nan,
+                          np.nan, np.nan, np.nan, np.nan,
+                          np.nan, np.nan])
+        
+def add_direction_uncertainty(wdir_era5, sigma=30):
+    """Add Gaussian noise to wind direction (deg)"""
+    noise = np.random.normal(0, sigma, size=wdir_era5.shape)
+    return np.mod(wdir_era5 + noise, 360)
+
+def plot_sar_wind(df_wv1_unstable_gt15, idx, SAR_data_path, cmod5n_inverse):
+    """
+    Plot SAR wind data with CMOD-derived wind speed, sigma0, and PSD.
+    
+    Parameters:
+    -----------
+    df_wv1_unstable_gt15 : pandas.DataFrame
+        DataFrame containing SAR metadata
+    idx : int
+        Index of the record to plot
+    SAR_data_path : Path or str
+        Path to the directory containing SAR data files
+    cmod5n_inverse : function
+        Function to calculate wind speed from SAR data
+        
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        The created figure object
+    """
+    
+    # Extract data for the given index
+    fn = df_wv1_unstable_gt15.renamed_filename.iloc[idx]
+    wdir_rad = df_wv1_unstable_gt15.wdir.iloc[idx]
+    wdir_deg_from_north = np.rad2deg(wdir_rad) % 360
+    wspd_era5 = df_wv1_unstable_gt15.wspd.iloc[idx]
+    
+    # Load SAR data
+    ds = xr.open_dataset(SAR_data_path / fn)
+    sigma0 = ds['sigma0'][0]
+    incidence_angle = ds['incidence'].values
+    ground_heading = ds['ground_heading'].values
+    
+    # Calculate relative wind direction
+    phi = wdir_deg_from_north - ground_heading
+    phi = np.mod(phi + 180, 360) - 180
+    
+    # Calculate CMOD wind speed
+    wspd_cmod = cmod5n_inverse(sigma0, phi, incidence_angle, iterations=10)
+    
+    # Create 1x3 plot layout
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    
+    # Plot 1: CMOD derived wind speed with wind direction arrow
+    im1 = axes[0].imshow(wspd_cmod)
+    cbar1 = plt.colorbar(im1, ax=axes[0], label="Wind Speed [m/s]")
+    axes[0].set_title(f"CMOD5n Wind Speed\nMedian = {np.nanmedian(wspd_cmod):.2f} m/s")
+    
+    # Get center of the image
+    center_y, center_x = np.array(wspd_cmod.shape) / 2
+    
+    arrow_angle_rad = np.deg2rad(wdir_deg_from_north + 180)
+    dx = np.sin(arrow_angle_rad)  
+    dy = -np.cos(arrow_angle_rad)  
+    
+    # Draw arrow
+    arrow_length = min(wspd_cmod.shape) / 6  
+    axes[0].arrow(center_x, center_y, dx * arrow_length, dy * arrow_length, 
+                  head_width=arrow_length/3, head_length=arrow_length/2, 
+                  fc='k', ec='k', linewidth=2)
+    
+    # Add North indicator for reference
+    axes[0].text(0.02, 0.98, "N↑", transform=axes[0].transAxes, 
+                 fontsize=12, fontweight='bold', va='top')
+    
+    # Plot 2: Sigma0
+    im2 = axes[1].imshow(sigma0)
+    cbar2 = plt.colorbar(im2, ax=axes[1], label="Sigma0 [linear]")
+    axes[1].set_title("Sigma0 (Normalized Radar Cross Section)")
+    
+    # Plot 3: PSD of sigma0
+    # Calculate 2D Power Spectral Density
+    sigma0_clean = np.nan_to_num(sigma0)  
+    
+    # First, compute 2D FFT and shift zero frequency to center
+    f_sigma0 = np.fft.fft2(sigma0_clean)
+    f_sigma0_shifted = np.fft.fftshift(f_sigma0)
+    psd_2d = np.abs(f_sigma0_shifted)**2
+    
+    # Plot PSD (log scale is often better for visualizing PSD)
+    im3 = axes[2].imshow(np.log10(psd_2d + 1e-10)) 
+    cbar3 = plt.colorbar(im3, ax=axes[2], label="Log10 PSD")
+    axes[2].set_title("Power Spectral Density of Sigma0")
+    
+    # Add annotation for wind direction and ERA5 speed
+    info_text = f"Wind Direction: {wdir_deg_from_north:.1f}°\nERA5 Wind Speed: {wspd_era5:.2f} m/s"
+    axes[0].text(0.02, 0.02, info_text, transform=axes[0].transAxes, 
+                 bbox=dict(facecolor='white', alpha=0.7), fontsize=10, va='bottom')
+    
+    plt.tight_layout()
+    
+    return fig
