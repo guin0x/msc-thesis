@@ -761,7 +761,7 @@ def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=
 
 def add_phi_nominal_to_dataset(file_path, wdir_deg_from_north, perturbed_wdir):
     try:
-        with xr.open_dataset(file_path) as ds:
+        with xr.open_dataset(file_path,  engine='h5netcdf') as ds:
             ground_heading = ds.ground_heading.values  # Raw satellite heading
             
             # 1. Normalize ground_heading to 0-360°
@@ -897,7 +897,7 @@ def add_direction_uncertainty(wdir_era5, sigma=30):
     noise = np.random.normal(0, sigma, size=wdir_era5.shape)
     return np.mod(wdir_era5 + noise, 360)
 
-def plot_sar_wind(df_wv1_unstable_gt15, idx, SAR_data_path, cmod5n_inverse):
+def plot_sar_wind(df_wv1_unstable_gt15, idx, cmod5n_inverse):
     """
     Plot SAR wind data with CMOD-derived wind speed, sigma0, and PSD.
     
@@ -907,8 +907,6 @@ def plot_sar_wind(df_wv1_unstable_gt15, idx, SAR_data_path, cmod5n_inverse):
         DataFrame containing SAR metadata
     idx : int
         Index of the record to plot
-    SAR_data_path : Path or str
-        Path to the directory containing SAR data files
     cmod5n_inverse : function
         Function to calculate wind speed from SAR data
         
@@ -920,12 +918,14 @@ def plot_sar_wind(df_wv1_unstable_gt15, idx, SAR_data_path, cmod5n_inverse):
     
     # Extract data for the given index
     fn = df_wv1_unstable_gt15.renamed_filename.iloc[idx]
+    path_to_data = df_wv1_unstable_gt15.path_to_sar_file.iloc[idx]
+    
     wdir_rad = df_wv1_unstable_gt15.wdir.iloc[idx]
     wdir_deg_from_north = np.rad2deg(wdir_rad) % 360
     wspd_era5 = df_wv1_unstable_gt15.wspd.iloc[idx]
     
     # Load SAR data
-    ds = xr.open_dataset(SAR_data_path / fn)
+    ds = xr.open_dataset(path_to_data, engine='h5netcdf')
     sigma0 = ds['sigma0'][0]
     incidence_angle = ds['incidence'].values
     ground_heading = ds['ground_heading'].values

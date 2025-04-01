@@ -200,6 +200,6 @@ if __name__ == "__main__":
     plt.plot(U, 10 * np.log10(sigma_0))
     plt.grid(True)
     plt.xlabel("Wind speed $U_{10}$ [m/s]")
-    plt.ylabel("Normalized radar cross section $\sigma_0$ [dB]")
+    plt.ylabel("Normalized radar cross section $\\sigma_0$ [dB]")
     plt.title("CMOD5N Forward Model (θ = 40°, φ = 0°)")
     plt.tight_layout()
