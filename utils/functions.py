@@ -989,3 +989,157 @@ def plot_sar_wind(df_wv1_unstable_gt15, idx, cmod5n_inverse):
     plt.tight_layout()
     
     return fig
+
+def compute_spectral_wind_errors(file_path, era5_wind_speed, wdir_nominal, perturbed_wdir=None, perturbation_sigma=30):
+    """
+    Compute wind speed errors across different spectral bands using the forward-inverse CMOD approach.
+    
+    Parameters:
+    -----------
+    file_path : str
+        Path to the SAR data file
+    era5_wind_speed : float
+        Single ERA5 wind speed value for the entire scene
+    wdir_nominal : float
+        Nominal wind direction in degrees
+    perturbed_wdir : float, optional
+        Perturbed wind direction. If None, will add Gaussian noise to wdir_nominal
+    perturbation_sigma : float, default=30
+        Standard deviation for Gaussian perturbation if perturbed_wdir is None
+        
+    Returns:
+    --------
+    dict
+        Dictionary containing error metrics for each spectral band
+    """
+    try:
+        # Open dataset and extract data
+        with xr.open_dataset(file_path) as ds:
+            sigma0_values = ds.sigma0.values
+            ground_heading = ds.ground_heading.values
+            incidence = ds.incidence.values
+
+            if sigma0_values.ndim == 3:
+                sigma0_values = sigma0_values[0]
+                        
+            # Clean NaN rows/columns if needed
+            if np.isnan(sigma0_values[-1, :]).all():
+                sigma0_values = sigma0_values[:-1, :]
+                ground_heading = ground_heading[:-1, :]
+                incidence = incidence[:-1, :]
+
+            if np.isnan(sigma0_values[:, -1]).all():
+                sigma0_values = sigma0_values[:, :-1]
+                ground_heading = ground_heading[:, :-1]
+                incidence = incidence[:, :-1]
+            
+            # Generate perturbed wind direction if not provided
+            if perturbed_wdir is None:
+                noise = np.random.normal(0, perturbation_sigma)
+                perturbed_wdir = np.mod(wdir_nominal + noise, 360)
+            
+            # Calculate phi angles
+            azimuth_look = np.mod(ground_heading + 90, 360)
+            phi_nominal = wdir_nominal - azimuth_look
+            phi_perturbed = perturbed_wdir - azimuth_look
+            
+            # Wrap to [-180°, 180°]
+            phi_nominal = ((phi_nominal + 180) % 360) - 180
+            phi_perturbed = ((phi_perturbed + 180) % 360) - 180
+            
+            # Forward model: Generate simulated sigma0 using perturbed direction
+            sigma0_cmod = cmod5n_forward(np.full(phi_perturbed.shape, era5_wind_speed),
+                                         phi_perturbed,
+                                         incidence)
+        
+        # Compute 2D Fourier transform and power spectrum of the simulated sigma0
+        fft_data = np.fft.fft2(sigma0_cmod)
+        psd_2d = np.abs(fft_data)**2
+        
+        # Set up frequency grid
+        freq_x = np.fft.fftfreq(sigma0_cmod.shape[1])
+        freq_y = np.fft.fftfreq(sigma0_cmod.shape[0])
+        kx, ky = np.meshgrid(freq_x, freq_y)
+        k_magnitude = np.sqrt(kx**2 + ky**2)
+        
+        # Define wavenumber bands
+        k_bands = [
+            (0, 0.1),     # Band 0: Low wavenumbers (large scales)
+            (0.1, 0.3),   # Band 1: Medium wavenumbers
+            (0.3, np.inf) # Band 2: High wavenumbers (small scales)
+        ]
+        
+        results = {
+            # 'true_sigma0_median': np.median(sigma0_values),
+            # 'sigma0_cmod_median': np.median(sigma0_cmod),
+            # 'sigma0_norm_error': (np.median(sigma0_cmod) - np.median(sigma0_values)) / np.median(sigma0_values),
+            # 'wdir_nominal': wdir_nominal,
+            # 'wdir_perturbed': perturbed_wdir
+        }
+        
+        # Process each band
+        for i, (k_min, k_max) in enumerate(k_bands):
+            mask = (k_magnitude >= k_min) & (k_magnitude < k_max)
+            
+            if np.any(mask):
+                # Create filtered version of simulated sigma0 for this band
+                fft_filtered = np.zeros_like(fft_data)
+                fft_filtered[mask] = fft_data[mask]
+                sigma0_filtered = np.real(np.fft.ifft2(fft_filtered))
+                
+                # Inverse model: Retrieve wind speed using nominal direction
+                wspd_band = cmod5n_inverse(sigma0_filtered, phi_nominal, incidence)
+                
+                # Calculate error metrics
+                error = wspd_band - era5_wind_speed
+                abs_error = np.abs(error)
+                rel_error = error / era5_wind_speed
+                
+                results[f'band{i}_wspd_mean'] = np.nanmean(wspd_band)
+                results[f'band{i}_wspd_median'] = np.nanmedian(wspd_band)
+                results[f'band{i}_error_mean'] = np.nanmean(error)
+                results[f'band{i}_error_median'] = np.nanmedian(error) 
+                results[f'band{i}_abs_error_mean'] = np.nanmean(abs_error)
+                results[f'band{i}_rel_error_mean'] = np.nanmean(rel_error)
+                results[f'band{i}_rmse'] = np.sqrt(np.nanmean(error**2))
+        
+        return results
+        
+    except Exception as e:
+        print(f"Error processing {file_path}: {str(e)}")
+        return None
+
+def analyze_band_dependencies(df, wind_col='wspd', wind_dir_col='wdir'):
+    """
+    Apply spectral analysis to all files in the dataframe
+    
+    Parameters:
+    -----------
+    df : pandas DataFrame
+        Contains paths to SAR files and ERA5 wind data
+    wind_col : str
+        Column name for ERA5 wind speed
+    wind_dir_col : str
+        Column name for ERA5 wind direction (in radians)
+        
+    Returns:
+    --------
+    pandas DataFrame
+        Original dataframe with added band-specific error columns
+    """
+    result_rows = []
+    
+    for _, row in df.iterrows():
+        file_path = row['path_to_sar_file']
+        era5_wspd = row[wind_col]
+        era5_wdir = np.rad2deg(row[wind_dir_col]) % 360  # Convert to degrees
+        
+        band_errors = compute_spectral_wind_errors(file_path, era5_wspd, era5_wdir)
+        
+        if band_errors:
+            # Add band results to the row
+            result_row = row.to_dict()
+            result_row.update(band_errors)
+            result_rows.append(result_row)
+    
+    return pd.DataFrame(result_rows)
