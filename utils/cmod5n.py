@@ -201,21 +201,21 @@ def cmod5n_inverse(sigma0_obs, phi, incidence, iterations=10):
     return V
 
 
-if __name__ == "__main__":
-    from matplotlib import pyplot as plt
+# if __name__ == "__main__":
+#     from matplotlib import pyplot as plt
 
-    wdir = np.linspace(-180, 180, 100)
-    # Incident angle
-    theta_i = 40
-    wdir = 0
-    # Wind strength
-    U = np.linspace(2, 20, 4)
-    sigma_0 = cmod5n_forward(
-        U, wdir + np.zeros_like(U), theta_i + np.zeros_like(U)
-    )
-    sigma_0 = cmod5n_forward(U, wdir, theta_i)
-    plt.figure()
-    plt.plot(U, 10 * np.log10(sigma_0))
-    plt.grid()
-    plt.xlabel("$U_{10}$ [m/s]")
-    plt.ylabel("$\sigma_0$ [dB]")
+#     wdir = np.linspace(-180, 180, 100)
+#     # Incident angle
+#     theta_i = 40
+#     wdir = 0
+#     # Wind strength
+#     U = np.linspace(2, 20, 4)
+#     sigma_0 = cmod5n_forward(
+#         U, wdir + np.zeros_like(U), theta_i + np.zeros_like(U)
+#     )
+#     sigma_0 = cmod5n_forward(U, wdir, theta_i)
+#     plt.figure()
+#     plt.plot(U, 10 * np.log10(sigma_0))
+#     plt.grid()
+#     plt.xlabel("$U_{10}$ [m/s]")
+#     plt.ylabel("$\sigma_0$ [dB]")
