@@ -50,7 +50,7 @@ def main():
                         default='projects/fluxsar/data/Sentinel1/WV/2021',
                         # default = "processed_data/SAR/2020",
                         help='Path to SAR data for 2021.')
-    parser.add_argument('--output', type=str, default='results',
+    parser.add_argument('--output', type=str, default='msc-thesis/results',
                         help='Path to output directory.')
     parser.add_argument('--num_processes', type=int, default=48,
                         help='Number of processes to use for parallel processing.')
