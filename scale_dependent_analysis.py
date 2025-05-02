@@ -27,7 +27,7 @@ def main():
     """Main function to execute the workflow."""
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Analyze scale-dependent wind stress variability.')
-    parser.add_argument('--processeddata', type=str, default='processeddata',
+    parser.add_argument('--processed_data', type=str, default='processed_data',
                         help='Path to processed data directory.')
     parser.add_argument('--sardata2020', type=str, default='projects/flux/sardata/Sentinel1/WV/2020',
                         help='Path to SAR data for 2020.')
@@ -42,7 +42,7 @@ def main():
     args = parser.parse_args()
     
     # Set paths
-    processeddata_path = Path(args.processeddata)
+    processed_data_path = Path(args.processed_data)
     sar_data_path_2020 = Path(args.sardata2020)
     sar_data_path_2021 = Path(args.sardata2021)
     output_path = Path(args.output)
@@ -54,18 +54,18 @@ def main():
     # Load data from parquet files
     print("Loading data from parquet files...")
     try:
-        df_wv1 = pd.read_parquet(processeddata_path / "wv1unstablegt15.parquet")
-        df_wv2 = pd.read_parquet(processeddata_path / "wv2unstablegt15.parquet")
+        df_wv1 = pd.read_parquet(processed_data_path / "wv1_complete.parquet")
+        df_wv2 = pd.read_parquet(processed_data_path / "wv2_complete.parquet")
         print(f"Loaded {len(df_wv1)} WV1 records and {len(df_wv2)} WV2 records.")
     except Exception as e:
         print(f"Error loading parquet files: {e}")
-        print("Make sure the 'processeddata' directory contains the required parquet files.")
+        print("Make sure the 'processed_data' directory contains the required parquet files.")
         return
     
     # Check missing SAR data paths
     print("Checking SAR data paths...")
-    df_wv1 = df_wv1[df_wv1['pathtosarfile'].notna()]
-    df_wv2 = df_wv2[df_wv2['pathtosarfile'].notna()]
+    df_wv1 = df_wv1[df_wv1['path_to_sar_file'].notna()]
+    df_wv2 = df_wv2[df_wv2['path_to_sar_file'].notna()]
     print(f"After removing NaN paths: {len(df_wv1)} WV1 records and {len(df_wv2)} WV2 records.")
     
     # Create records for parallel processing
@@ -73,7 +73,7 @@ def main():
     records_wv1 = []
     for _, row in df_wv1.iterrows():
         records_wv1.append({
-            'sar_filepath': row['pathtosarfile'],
+            'sar_filepath': row['path_to_sar_file'],
             'era5_wspd': row['wspd'],
             'era5_wdir': np.rad2deg(row['wdir']) % 360,  # Convert from radians to degrees
             'seed': args.seed
@@ -82,7 +82,7 @@ def main():
     records_wv2 = []
     for _, row in df_wv2.iterrows():
         records_wv2.append({
-            'sar_filepath': row['pathtosarfile'],
+            'sar_filepath': row['path_to_sar_file'],
             'era5_wspd': row['wspd'],
             'era5_wdir': np.rad2deg(row['wdir']) % 360,  # Convert from radians to degrees
             'seed': args.seed
