@@ -27,11 +27,11 @@ def main():
     """Main function to execute the workflow."""
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Analyze scale-dependent wind stress variability.')
-    parser.add_argument('--processed_data', type=str, default='processed_data',
+    parser.add_argument('--processed_data', type=str, default='home/gfeirreiraseco/msc-thesis/processed_data',
                         help='Path to processed data directory.')
-    parser.add_argument('--sardata2020', type=str, default='projects/flux/sardata/Sentinel1/WV/2020',
+    parser.add_argument('--sardata2020', type=str, default='projects/fluxsar/data/Sentinel1/WV/2020',
                         help='Path to SAR data for 2020.')
-    parser.add_argument('--sardata2021', type=str, default='projects/flux/sardata/Sentinel1/WV/2021',
+    parser.add_argument('--sardata2021', type=str, default='projects/fluxsar/data/Sentinel1/WV/2021',
                         help='Path to SAR data for 2021.')
     parser.add_argument('--output', type=str, default='results',
                         help='Path to output directory.')

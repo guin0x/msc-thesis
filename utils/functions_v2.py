@@ -52,7 +52,7 @@ def compute_phi(wdir, azimuth_look):
 def cmod5n_forward(wspd, phi, incidence):
     """CMOD5N forward model to compute sigma0 from wind parameters."""
     try:
-        from utils.fastcmod5n import cmod5n_forward
+        from utils.cmod5n import cmod5n_forward
         return cmod5n_forward(np.full(phi.shape, wspd), phi, incidence)
     except ImportError:
         try:
@@ -68,7 +68,7 @@ def cmod5n_forward(wspd, phi, incidence):
 def cmod5n_inverse(sigma0, phi, incidence, initial_guess=None):
     """CMOD5N inverse model to compute wind speed from sigma0."""
     try:
-        from utils.fastcmod5n import cmod5n_inverse
+        from utils.cmod5n import cmod5n_inverse
         return cmod5n_inverse(sigma0, phi, incidence, initial_guess)
     except ImportError:
         try:
