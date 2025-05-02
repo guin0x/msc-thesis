@@ -15,6 +15,7 @@ from pathlib import Path
 from multiprocessing import Pool
 import argparse
 from datetime import datetime
+import tqdm
 
 # Import custom functions
 from utils.functions_v2 import (
@@ -22,6 +23,16 @@ from utils.functions_v2 import (
     plot_error_distributions,
     kruskal_wallis_test
 )
+
+# Helper function for parallel processing
+def process_record(record):
+    """Wrapper function for parallel processing"""
+    return process_sar_file(
+        record['sar_filepath'],
+        record['era5_wspd'],
+        record['era5_wdir'],
+        record.get('seed')
+    )
 
 def main():
     """Main function to execute the workflow."""
@@ -92,13 +103,12 @@ def main():
     print(f"Processing {len(records_wv1)} WV1 files in parallel using {args.num_processes} processes...")
     start_time = datetime.now()
     
-    # Helper function for parallel processing
-    def process_record(record):
-        return process_sar_file(record['sar_filepath'], record['era5_wspd'], record['era5_wdir'], record['seed'])
-    
     # Process WV1 files
     with Pool(processes=args.num_processes) as pool:
-        results_wv1 = pool.map(process_record, records_wv1)
+        results_wv1 = list(tqdm.tqdm(
+            pool.imap_unordered(process_record, records_wv1),
+            total=len(records_wv1),
+        ))
     
     # Filter out None results
     results_wv1 = [result for result in results_wv1 if result is not None]
@@ -107,7 +117,10 @@ def main():
     
     # Process WV2 files
     with Pool(processes=args.num_processes) as pool:
-        results_wv2 = pool.map(process_record, records_wv2)
+        results_wv2 = list(tqdm.tqdm(
+            pool.imap_unordered(process_record, records_wv2),
+            total=len(records_wv2),
+        ))
     
     # Filter out None results
     results_wv2 = [result for result in results_wv2 if result is not None]
