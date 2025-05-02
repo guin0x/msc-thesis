@@ -96,15 +96,18 @@ def cmod5n_forward(v, phi, theta):
     # SlS0 = [S_vec < S0]
     # S_vec[SlS0] = S0[SlS0]
     a3 = 1.0 / (1.0 + np.exp(-s_vec))
-    #print(a3)
-    #print(s0)
-    #print(s)
+    # print(a3)
+    # print(s0)
+    # print(s)
 
     SlS0 = s < s0
-    #print(SlS0)
+
+    # print(SlS0)
     a3[SlS0] = a3[SlS0] * (s[SlS0] / s0[SlS0]) ** (s0[SlS0] * (1.0 - a3[SlS0]))
     # A3=A3*(S/S0)**( S0*(1.- A3))
     B0 = (a3 ** GAM) * 10.0 ** (a0 + a1 * v)
+
+    # print(B0)
 
     #  !  B1: FUNCTION OF WIND SPEED AND INCIDENCE ANGLE
     B1 = C[15] * v * (0.5 + x - np.tanh(4.0 * (x + C[16] + C[17] * v)))
@@ -120,9 +123,9 @@ def cmod5n_forward(v, phi, theta):
     V2ltY0 = V2 < y0
     V2[V2ltY0] = a + b * (V2[V2ltY0] - 1.0) ** PN
     B2 = (-D1 + D2 * V2) * np.exp(-V2)
-
     #  !  CMOD5_N: COMBINE THE THREE FOURIER TERMS
     cmod5_n = B0 * (1.0 + B1 * csfi + B2 * cs2_fi) ** z_pow
+
     return cmod5_n
 
 def cmod5n_inverse_MonteCarlo(sigma0, phi, theta):
@@ -179,12 +182,14 @@ def cmod5n_inverse(sigma0_obs, phi, incidence, iterations=10):
     # First guess wind speed
     V = array([10.0]) * ones(sigma0_obs.shape)
     step = 10.0
-
     # Iterating until error is smaller than threshold
+
     for iterno in range(1, iterations):
         # print iterno
         sigma0_calc = cmod5n_forward(V, phi, incidence)
+    
         ind = sigma0_calc - sigma0_obs > 0
+        
         V = V + step
         V[ind] = V[ind] - 2 * step
         step = step / 2

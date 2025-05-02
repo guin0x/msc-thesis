@@ -65,15 +65,15 @@ def cmod5n_forward(wspd, phi, incidence):
             inc_rad = np.deg2rad(incidence)
             return 0.1 * (1 + np.cos(phi_rad)) * wspd**0.5 * np.exp(-0.1 * inc_rad)
 
-def cmod5n_inverse(sigma0, phi, incidence, initial_guess=None):
+def cmod5n_inverse(sigma0, phi, incidence):
     """CMOD5N inverse model to compute wind speed from sigma0."""
     try:
         from utils.cmod5n import cmod5n_inverse
-        return cmod5n_inverse(sigma0, phi, incidence, initial_guess)
+        return cmod5n_inverse(sigma0, phi, incidence)
     except ImportError:
         try:
             from utils.cmod5n import cmod5n_inverse
-            return cmod5n_inverse(sigma0, phi, incidence, initial_guess)
+            return cmod5n_inverse(sigma0, phi, incidence,)
         except ImportError:
             print("Warning: No CMOD5N module found.")
             # Simplified approximation
@@ -117,6 +117,7 @@ def band_filter(fft_data, kmagnitude, kmin, kmax):
 def calculate_error_metrics(retrieved_wspd, true_wspd):
     """Calculate error metrics between retrieved and true wind speeds."""
     # Handle NaN values
+    
     if hasattr(retrieved_wspd, 'flatten'):
         retrieved_wspd = retrieved_wspd.flatten()
     
@@ -170,30 +171,23 @@ def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
         
         # Extract SAR data
         sigma_sar = sar_ds.sigma0.values
+        incidence = sar_ds.incidence.values
+        ground_heading = sar_ds.ground_heading.values
+
         if sigma_sar.ndim == 3:
             sigma_sar = sigma_sar[0]  # Take first slice if 3D
         
         # Clean NaN rows/columns
         if np.isnan(sigma_sar[-1, :]).all():
             sigma_sar = sigma_sar[:-1, :]
+            incidence = incidence[:-1, :]
+            ground_heading = ground_heading[:-1, :]
+
         if np.isnan(sigma_sar[:, -1]).all():
             sigma_sar = sigma_sar[:, :-1]
-        
-        # Extract incidence angle and ground heading
-        incidence = sar_ds.incidence.values
-        ground_heading = sar_ds.ground_heading.values
-        
-        # Clean NaN rows/columns in ancillary data too
-        if np.isnan(incidence[-1, :]).all():
-            incidence = incidence[:-1, :]
-        if np.isnan(incidence[:, -1]).all():
             incidence = incidence[:, :-1]
-            
-        if np.isnan(ground_heading[-1, :]).all():
-            ground_heading = ground_heading[:-1, :]
-        if np.isnan(ground_heading[:, -1]).all():
             ground_heading = ground_heading[:, :-1]
-        
+                
         # Normalize ground_heading to 0-360
         ground_heading = np.mod(ground_heading, 360)
         
@@ -224,11 +218,12 @@ def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
         band1_cmod = band_filter(fft_cmod, kmag_cmod, 0.1, 0.3)
         band2_cmod = band_filter(fft_cmod, kmag_cmod, 0.3, np.inf)
         
+        
         # CMOD inversion for each band
         wspd_band0 = cmod5n_inverse(band0_sar, phi_nominal, incidence)
         wspd_band1 = cmod5n_inverse(band1_sar, phi_nominal, incidence)
         wspd_band2 = cmod5n_inverse(band2_sar, phi_nominal, incidence)
-        
+
         # Calculate error metrics for each band
         errors_band0 = calculate_error_metrics(wspd_band0, era5_wspd)
         errors_band1 = calculate_error_metrics(wspd_band1, era5_wspd)
