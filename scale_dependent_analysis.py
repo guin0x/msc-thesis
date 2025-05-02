@@ -38,11 +38,17 @@ def main():
     """Main function to execute the workflow."""
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Analyze scale-dependent wind stress variability.')
-    parser.add_argument('--processed_data', type=str, default='/home/gfeirreiraseco/msc-thesis/processed_data',
+    parser.add_argument('--processed_data', type=str, 
+                        default='/home/gfeirreiraseco/msc-thesis/processed_data',
+                        # default='processed_data',
                         help='Path to processed data directory.')
-    parser.add_argument('--sardata2020', type=str, default='projects/fluxsar/data/Sentinel1/WV/2020',
+    parser.add_argument('--sardata2020', type=str, 
+                        default='projects/fluxsar/data/Sentinel1/WV/2020',
+                        # default = "processed_data/SAR/2020",
                         help='Path to SAR data for 2020.')
-    parser.add_argument('--sardata2021', type=str, default='projects/fluxsar/data/Sentinel1/WV/2021',
+    parser.add_argument('--sardata2021', type=str, 
+                        default='projects/fluxsar/data/Sentinel1/WV/2021',
+                        # default = "processed_data/SAR/2020",
                         help='Path to SAR data for 2021.')
     parser.add_argument('--output', type=str, default='results',
                         help='Path to output directory.')
@@ -85,8 +91,9 @@ def main():
     for _, row in df_wv1.iterrows():
         records_wv1.append({
             'sar_filepath': row['path_to_sar_file'],
+            # 'sar_filepath': row['path_to_sar_file'].replace("/projects/fluxsar/data/", "processed_data/"),
             'era5_wspd': row['wspd'],
-            'era5_wdir': np.rad2deg(row['wdir']) % 360,  # Convert from radians to degrees
+            'era5_wdir': np.rad2deg(row['wdir_deg_from_north']),  
             'seed': args.seed
         })
     
@@ -94,8 +101,9 @@ def main():
     for _, row in df_wv2.iterrows():
         records_wv2.append({
             'sar_filepath': row['path_to_sar_file'],
+            # 'sar_filepath': row['path_to_sar_file'].replace("/projects/fluxsar/data/", "processed_data/"),
             'era5_wspd': row['wspd'],
-            'era5_wdir': np.rad2deg(row['wdir']) % 360,  # Convert from radians to degrees
+            'era5_wdir': np.rad2deg(row['wdir_deg_from_north']),  
             'seed': args.seed
         })
     
@@ -162,11 +170,11 @@ def main():
         f.write(f"p-value: {p_value:.10f}\n\n")
         
         if is_significant:
-            f.write("CONCLUSION: GMF is Scale-Dependent (Reject H₀)\n")
+            f.write("CONCLUSION: GMF is Scale-Dependent (Reject H_0)\n")
             f.write("The analysis provides evidence that the wind stress field exhibits\n")
             f.write("statistically significant scale-dependent patterns.\n")
         else:
-            f.write("CONCLUSION: GMF is Not Scale-Dependent (Accept H₀)\n")
+            f.write("CONCLUSION: GMF is Not Scale-Dependent (Accept H_0)\n")
             f.write("The analysis does not provide sufficient evidence to conclude that\n")
             f.write("the wind stress field exhibits scale-dependent patterns.\n")
         
@@ -195,11 +203,11 @@ def main():
     print(f"p-value: {p_value:.10f}")
     
     if is_significant:
-        print("\nCONCLUSION: GMF is Scale-Dependent (Reject H₀)")
+        print("\nCONCLUSION: GMF is Scale-Dependent (Reject H_0)")
         print("The analysis provides evidence that the wind stress field exhibits")
         print("statistically significant scale-dependent patterns.")
     else:
-        print("\nCONCLUSION: GMF is Not Scale-Dependent (Accept H₀)")
+        print("\nCONCLUSION: GMF is Not Scale-Dependent (Accept H_0)")
         print("The analysis does not provide sufficient evidence to conclude that")
         print("the wind stress field exhibits scale-dependent patterns.")
 
