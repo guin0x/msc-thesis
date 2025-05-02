@@ -1109,37 +1109,3 @@ def compute_spectral_wind_errors(file_path, era5_wind_speed, wdir_nominal, pertu
         print(f"Error processing {file_path}: {str(e)}")
         return None
 
-def analyze_band_dependencies(df, wind_col='wspd', wind_dir_col='wdir'):
-    """
-    Apply spectral analysis to all files in the dataframe
-    
-    Parameters:
-    -----------
-    df : pandas DataFrame
-        Contains paths to SAR files and ERA5 wind data
-    wind_col : str
-        Column name for ERA5 wind speed
-    wind_dir_col : str
-        Column name for ERA5 wind direction (in radians)
-        
-    Returns:
-    --------
-    pandas DataFrame
-        Original dataframe with added band-specific error columns
-    """
-    result_rows = []
-    
-    for _, row in df.iterrows():
-        file_path = row['path_to_sar_file']
-        era5_wspd = row[wind_col]
-        era5_wdir = np.rad2deg(row[wind_dir_col]) % 360  # Convert to degrees
-        
-        band_errors = compute_spectral_wind_errors(file_path, era5_wspd, era5_wdir)
-        
-        if band_errors:
-            # Add band results to the row
-            result_row = row.to_dict()
-            result_row.update(band_errors)
-            result_rows.append(result_row)
-    
-    return pd.DataFrame(result_rows)
