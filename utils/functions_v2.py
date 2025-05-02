@@ -181,7 +181,7 @@ def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
         
         # Extract incidence angle and ground heading
         incidence = sar_ds.incidence.values
-        ground_heading = sar_ds.groundheading.values
+        ground_heading = sar_ds.ground_heading.values
         
         # Clean NaN rows/columns in ancillary data too
         if np.isnan(incidence[-1, :]).all():
