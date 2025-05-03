@@ -93,7 +93,7 @@ def main():
             'sar_filepath': row['path_to_sar_file'],
             # 'sar_filepath': row['path_to_sar_file'].replace("/projects/fluxsar/data/", "processed_data/"),
             'era5_wspd': row['wspd'],
-            'era5_wdir': np.rad2deg(row['wdir_deg_from_north']),  
+            'era5_wdir': row['wdir_deg_from_north'],  
             'seed': args.seed
         })
     
@@ -103,7 +103,7 @@ def main():
             'sar_filepath': row['path_to_sar_file'],
             # 'sar_filepath': row['path_to_sar_file'].replace("/projects/fluxsar/data/", "processed_data/"),
             'era5_wspd': row['wspd'],
-            'era5_wdir': np.rad2deg(row['wdir_deg_from_north']),  
+            'era5_wdir': row['wdir_deg_from_north'],  
             'seed': args.seed
         })
     
