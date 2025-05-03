@@ -321,18 +321,18 @@ def main():
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Analyze scale-dependent wind stress variability.')
     parser.add_argument('--processed_data', type=str, 
-                        # default='/home/gfeirreiraseco/msc-thesis/processed_data',
-                        default='processed_data',
+                        default='/home/gfeirreiraseco/msc-thesis/processed_data',
+                        # default='processed_data',
                         help='Path to processed data directory.')
     parser.add_argument('--sardata2020', type=str, 
-                        # default='projects/fluxsar/data/Sentinel1/WV/2020',
-                        default = "processed_data/SAR/2020",
+                        default='projects/fluxsar/data/Sentinel1/WV/2020',
+                        # default = "processed_data/SAR/2020",
                         help='Path to SAR data for 2020.')
     parser.add_argument('--sardata2021', type=str, 
-                        # default='projects/fluxsar/data/Sentinel1/WV/2021',
-                        default = "processed_data/SAR/2020",
+                        default='projects/fluxsar/data/Sentinel1/WV/2021',
+                        # default = "processed_data/SAR/2020",
                         help='Path to SAR data for 2021.')
-    parser.add_argument('--output', type=str, default='msc-thesis/results',
+    parser.add_argument('--output', type=str, default='msc-thesis/results_v4',
                         help='Path to output directory.')
     parser.add_argument('--num_processes', type=int, default=48,
                         help='Number of processes to use for parallel processing.')
@@ -374,8 +374,8 @@ def main():
     records_wv1 = []
     for _, row in df_wv1.iterrows():
         records_wv1.append({
-            # 'sar_filepath': row['path_to_sar_file'],
-            'sar_filepath': row['path_to_sar_file'].replace("/projects/fluxsar/data/", "processed_data/"),
+            'sar_filepath': row['path_to_sar_file'],
+            # 'sar_filepath': row['path_to_sar_file'].replace("/projects/fluxsar/data/", "processed_data/"),
             'era5_wspd': row['wspd'],
             'era5_wdir': row['wdir_deg_from_north'],  
             'seed': args.seed
@@ -384,8 +384,8 @@ def main():
     records_wv2 = []
     for _, row in df_wv2.iterrows():
         records_wv2.append({
-            # 'sar_filepath': row['path_to_sar_file'],
-            'sar_filepath': row['path_to_sar_file'].replace("/projects/fluxsar/data/", "processed_data/"),
+            'sar_filepath': row['path_to_sar_file'],
+            # 'sar_filepath': row['path_to_sar_file'].replace("/projects/fluxsar/data/", "processed_data/"),
             'era5_wspd': row['wspd'],
             'era5_wdir': row['wdir_deg_from_north'],  
             'seed': args.seed
