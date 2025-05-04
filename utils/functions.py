@@ -1,1111 +1,1154 @@
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
-from scipy import stats
-from scipy.stats import ttest_ind, levene, ks_2samp, shapiro, bartlett, f_oneway, kruskal
-from statsmodels.stats.multitest import multipletests
+import pandas as pd
 import xarray as xr
-from utils.cmod5n import *
+from scipy import stats
+from pathlib import Path
+import matplotlib.pyplot as plt
+from scipy.stats import kruskal
+from statsmodels.stats.multitest import multipletests
 
-def check_normality(data, alpha=0.01):
-    """Test normality of data using Shapiro-Wilk test"""
-    # Subsample if data is too large (Shapiro-Wilk limit is 5000)
-    if len(data) > 5000:
-        np.random.seed(42)  # for reproducibility
-        data = np.random.choice(data, size=5000, replace=False)
-    
-    stat, p_value = shapiro(data)
-    
-    qq_x = np.linspace(0, 1, len(data))
-    qq_y = np.sort(data)
-    
-    return p_value > alpha, {
-        'test': 'Shapiro-Wilk',
-        'statistic': stat,
-        'p_value': p_value,
-        'normal': p_value > alpha,
-        'qq_data': (qq_x, qq_y)
-    }
-
-def bootstrap_confidence_intervals(data, n_bootstrap=1000, confidence=0.99):
-    """
-    Calculate bootstrap confidence intervals for the median, IQR, and skewness
-    
-    Parameters:
-    -----------
-    data : array-like
-        Data to bootstrap
-    n_bootstrap : int
-        Number of bootstrap samples
-    confidence : float
-        Confidence level (between 0 and 1)
-    
-    Returns:
-    --------
-    dict
-        Dictionary with confidence intervals for each statistic
-    """
-    bootstrap_medians = []
-    bootstrap_iqrs = []
-    bootstrap_skews = []
-    
-    for _ in range(n_bootstrap):
-        sample = np.random.choice(data, size=len(data), replace=True)
-        bootstrap_medians.append(np.median(sample))
-        # Calculate IQR (Q3 - Q1) as a robust measure of dispersion
-        q1, q3 = np.percentile(sample, [25, 75])
-        bootstrap_iqrs.append(q3 - q1)
-        bootstrap_skews.append(stats.skew(sample))
-    
-    lower_quantile = (1 - confidence) / 2
-    upper_quantile = 1 - lower_quantile
-    
-    return {
-        'median': (np.quantile(bootstrap_medians, lower_quantile), 
-                   np.quantile(bootstrap_medians, upper_quantile)),
-        'iqr': (np.quantile(bootstrap_iqrs, lower_quantile), 
-                np.quantile(bootstrap_iqrs, upper_quantile)),
-        'skewness': (np.quantile(bootstrap_skews, lower_quantile), 
-                     np.quantile(bootstrap_skews, upper_quantile))
-    }
-
-def test_scale_dependence(df, band1_col, band2_col, alpha=0.01):
-    """
-    Test for scale dependence between two frequency bands
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        DataFrame containing the band data
-    band1_col : str
-        Column name for the first band
-    band2_col : str
-        Column name for the second band
-    alpha : float
-        Significance level
-    
-    Returns:
-    --------
-    dict
-        Dictionary with test results
-    """
-    # Remove NaN values
-    valid_data = df[[band1_col, band2_col]].dropna()
-    
-    # Check normality of each band
-    is_normal_band1, norm_test_band1 = check_normality(valid_data[band1_col])
-    is_normal_band2, norm_test_band2 = check_normality(valid_data[band2_col])
-    both_normal = is_normal_band1 and is_normal_band2
-    
-    # Test for equality of variances using both Levene (robust) and Bartlett (more power if normal)
-    levene_stat, levene_pvalue = levene(valid_data[band1_col], valid_data[band2_col])
-    bartlett_stat, bartlett_pvalue = bartlett(valid_data[band1_col], valid_data[band2_col])
-    
-    # Use more robust Levene's test by default, but consider Bartlett if data are normal
-    equal_var_test = "Bartlett's test" if both_normal else "Levene's test"
-    equal_var_pvalue = bartlett_pvalue if both_normal else levene_pvalue
-    equal_var = equal_var_pvalue > alpha
-    
-    # We'll use non-parametric tests since we're focusing on medians
-    # Non-parametric test for location (Mann-Whitney U test)
-    u_stat, u_pvalue = stats.mannwhitneyu(valid_data[band1_col], valid_data[band2_col])
-    first_moment_test = "Mann-Whitney U test"
-    first_moment_stat = u_stat
-    first_moment_pvalue = u_pvalue
-    
-    # Non-parametric test for scale (Mood's median test)
-    # mood_stat, mood_pvalue = stats.median_test(valid_data[band1_col], valid_data[band2_col])
-    mood_stat, mood_pvalue, _, _ = stats.median_test(valid_data[band1_col], valid_data[band2_col])
-    second_moment_test = "Mood's median test"
-    second_moment_stat = mood_stat
-    second_moment_pvalue = mood_pvalue
-    
-    # Distribution test (Kolmogorov-Smirnov)
-    ks_stat, ks_pvalue = ks_2samp(valid_data[band1_col], valid_data[band2_col])
-    
-    return {
-        'normality': {
-            'band1': {
-                'test': norm_test_band1['test'],
-                'p_value': norm_test_band1['p_value'],
-                'normal': norm_test_band1['normal']
-            },
-            'band2': {
-                'test': norm_test_band2['test'],
-                'p_value': norm_test_band2['p_value'],
-                'normal': norm_test_band2['normal']
-            },
-            'both_normal': both_normal
-        },
-        'first_moment': {
-            'test': first_moment_test,
-            'statistic': first_moment_stat,
-            'p_value': first_moment_pvalue,
-            'significant': first_moment_pvalue < alpha
-        },
-        'second_moment': {
-            'test': second_moment_test,
-            'statistic': second_moment_stat,
-            'p_value': second_moment_pvalue,
-            'significant': second_moment_pvalue < alpha,
-            'levene': {'statistic': levene_stat, 'p_value': levene_pvalue},
-            'bartlett': {'statistic': bartlett_stat, 'p_value': bartlett_pvalue}
-        },
-        'distribution': {
-            'test': 'Kolmogorov-Smirnov test',
-            'statistic': ks_stat,
-            'p_value': ks_pvalue,
-            'significant': ks_pvalue < alpha
-        },
-    }
-
-def perform_omnibus_tests(df, band_columns, alpha=0.01):
-    """
-    Perform omnibus tests across all bands before pairwise comparisons
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        DataFrame containing the band data
-    band_columns : list
-        List of column names for the bands
-    alpha : float
-        Significance level
-    
-    Returns:
-    --------
-    dict
-        Dictionary with test results
-    """
-    # Prepare data for testing
-    data_for_test = [df[band].dropna().values for band in band_columns]
-    
-    # Check normality of all bands
-    normality_results = [check_normality(band_data)[0] for band_data in data_for_test]
-    all_normal = all(normality_results)
-    
-    # For non-parametric analysis (focusing on medians), we'll use Kruskal-Wallis
-    # Kruskal-Wallis H-test (non-parametric alternative to one-way ANOVA)
-    h_stat, h_pvalue = kruskal(*data_for_test)
-    test_name = "Kruskal-Wallis H-test"
-    statistic = h_stat
-    p_value = h_pvalue
-    
-    return {
-        'test': test_name,
-        'statistic': statistic,
-        'p_value': p_value,
-        'significant': p_value < alpha,
-        'all_normal': all_normal
-    }
-
-# Adjust p-values for multiple comparisons
-def adjust_pvalues(p_values, method='bonferroni'):
-    """
-    Adjust p-values for multiple comparisons
-    
-    Parameters:
-    -----------
-    p_values : array-like
-        Array of p-values
-    method : str
-        Method for adjustment ('bonferroni', 'holm', 'fdr_bh')
-    
-    Returns:
-    --------
-    array
-        Adjusted p-values
-    """
-    return multipletests(p_values, method=method)[1]
-
-def bootstrap_ratio_confidence_intervals(data1, data2, n_bootstrap=1000, confidence=0.99):
-    """Calculate bootstrap confidence intervals for the ratio of medians"""
-    bootstrap_ratios = []
-    
-    for _ in range(n_bootstrap):
-        # Resample both datasets
-        sample1 = np.random.choice(data1, size=len(data1), replace=True)
-        sample2 = np.random.choice(data2, size=len(data2), replace=True)
-        # Calculate ratio of medians
-        ratio = np.median(sample1) / np.median(sample2)
-        bootstrap_ratios.append(ratio)
-    
-    lower_quantile = (1 - confidence) / 2
-    upper_quantile = 1 - lower_quantile
-    
-    return (np.quantile(bootstrap_ratios, lower_quantile),
-            np.quantile(bootstrap_ratios, upper_quantile))
-
-# Main analysis function
-def analyze_scale_dependence(df_wv1, df_wv2, bootstrap_samples=1000, confidence=0.99, alpha=0.01):
-    """
-    Comprehensive analysis of scale dependence using median-based methods
-    """
-    print("\n" + "="*80)
-    print("SCALE DEPENDENCE ANALYSIS")
-    print("="*80)
-    print(f"\nAnalysis Parameters:")
-    print(f"- Bootstrap Samples: {bootstrap_samples}")
-    print(f"- Confidence Level: {confidence*100}%")
-    print(f"- Significance Level (alpha): {alpha}")
-    
-    # Define band columns and pairs for comparison
-    band_columns = ['mean_psd_band0', 'mean_psd_band1', 'mean_psd_band2']
-    band_pairs = [
-        ('mean_psd_band0', 'mean_psd_band1'),
-        ('mean_psd_band1', 'mean_psd_band2'),
-        ('mean_psd_band0', 'mean_psd_band2')
-    ]
-    
-    # Results dictionary
-    results = {
-        'WV1': {'bootstrap': {}, 'omnibus': None, 'pairwise': {}},
-        'WV2': {'bootstrap': {}, 'omnibus': None, 'pairwise': {}}
-    }
-    
-    # 1. Normality check and visualization
-    print("\n" + "-"*80)
-    print("STEP 1: NORMALITY ASSESSMENT")
-    print("-"*80)
-    
-    for dataset_name, df in [('WV1', df_wv1), ('WV2', df_wv2)]:
-        print(f"\n{dataset_name} Normality Results:")
-        for band in band_columns:
-            data = df[band].dropna().values
-            is_normal, norm_test = check_normality(data)
-            print(f"  {band}:")
-            print(f"    Normal: {is_normal}")
-            print(f"    Shapiro-Wilk p-value: {norm_test['p_value']:.2e}")
-    
-    print("\nGenerating QQ plots for visual inspection...")
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    fig.suptitle('QQ Plots for Normality Assessment', fontsize=16)
-    
-    for i, (dataset_name, df) in enumerate([('WV1', df_wv1), ('WV2', df_wv2)]):
-        for j, band in enumerate(band_columns):
-            data = df[band].dropna().values
-            is_normal, norm_test = check_normality(data)
-            ax = axes[i, j]
-            stats.probplot(data, dist="norm", plot=ax)
-            ax.set_title(f"{dataset_name} - {band}\nNormal: {is_normal}")
-    
-    plt.tight_layout(rect=[0, 0, 1, 0.95])
-    plt.savefig('images/normality_qq_plots.png', dpi=300)
-    print("QQ plots saved as 'normality_qq_plots.png'")
-    
-    # 2. Bootstrap confidence intervals
-    print("\n" + "-"*80)
-    print("STEP 2: BOOTSTRAP ANALYSIS")
-    print("-"*80)
-    print(f"Computing {confidence*100}% confidence intervals using {bootstrap_samples} resamples\n")
-    
-    for dataset_name, df in [('WV1', df_wv1), ('WV2', df_wv2)]:
-        print(f"\n{dataset_name} Bootstrap Results:")
-        for band in band_columns:
-            valid_data = df[band].dropna().values
-            results[dataset_name]['bootstrap'][band] = bootstrap_confidence_intervals(
-                valid_data, n_bootstrap=bootstrap_samples, confidence=confidence
-            )
-            ci = results[dataset_name]['bootstrap'][band]
-            print(f"\n  {band}:")
-            print(f"    Median CI: [{ci['median'][0]:.2f}, {ci['median'][1]:.2f}]")
-            print(f"    IQR CI: [{ci['iqr'][0]:.2f}, {ci['iqr'][1]:.2f}]")
-            print(f"    Skewness CI: [{ci['skewness'][0]:.2f}, {ci['skewness'][1]:.2f}]")
-    
-    # 3. Omnibus tests
-    print("\n" + "-"*80)
-    print("STEP 3: OMNIBUS TESTS")
-    print("-"*80)
-    print("Testing for any differences among bands")
-    
-    for dataset_name, df in [('WV1', df_wv1), ('WV2', df_wv2)]:
-        results[dataset_name]['omnibus'] = perform_omnibus_tests(df, band_columns, alpha=alpha)
-        
-        is_significant = results[dataset_name]['omnibus']['significant']
-        test_name = results[dataset_name]['omnibus']['test']
-        statistic = results[dataset_name]['omnibus']['statistic']
-        p_value = results[dataset_name]['omnibus']['p_value']
-        
-        print(f"\n{dataset_name} Results:")
-        print(f"  Test: {test_name}")
-        print(f"  Statistic: {statistic:.2f}")
-        print(f"  p-value: {p_value:.2e}")
-        print(f"  Conclusion: {'Significant differences exist' if is_significant else 'No significant differences'}")
-    
-    # 4. Pairwise tests
-    print("\n" + "-"*80)
-    print("STEP 4: PAIRWISE COMPARISONS")
-    print("-"*80)
-    
-    for dataset_name, df in [('WV1', df_wv1), ('WV2', df_wv2)]:
-        print(f"\n{dataset_name} Pairwise Results:")
-        if not results[dataset_name]['omnibus']['significant']:
-            print("  Skipping (omnibus test not significant)")
-            continue
-            
-        first_moment_pvalues = []
-        second_moment_pvalues = []
-        distribution_pvalues = []
-        
-        for band1, band2 in band_pairs:
-            print(f"\n  Comparing {band1} vs {band2}:")
-            test_result = test_scale_dependence(df, band1, band2, alpha=alpha)
-            results[dataset_name]['pairwise'][(band1, band2)] = test_result
-            
-            # Collect p-values
-            first_moment_pvalues.append(test_result['first_moment']['p_value'])
-            second_moment_pvalues.append(test_result['second_moment']['p_value'])
-            distribution_pvalues.append(test_result['distribution']['p_value'])
-            
-            # Print detailed results
-            print(f"    Mann-Whitney U test:")
-            print(f"      Statistic: {test_result['first_moment']['statistic']:.2f}")
-            print(f"      p-value: {test_result['first_moment']['p_value']:.2e}")
-            
-            print(f"    Mood's Median test:")
-            print(f"      Statistic: {test_result['second_moment']['statistic']:.2f}")
-            print(f"      p-value: {test_result['second_moment']['p_value']:.2e}")
-            
-            print(f"    KS test:")
-            print(f"      Statistic: {test_result['distribution']['statistic']:.2f}")
-            print(f"      p-value: {test_result['distribution']['p_value']:.2e}")
-        
-        # Adjust p-values
-        print("\n  Bonferroni-adjusted p-values:")
-        adjusted_first = adjust_pvalues(first_moment_pvalues)
-        adjusted_second = adjust_pvalues(second_moment_pvalues)
-        adjusted_distribution = adjust_pvalues(distribution_pvalues)
-        
-        for i, (band1, band2) in enumerate(band_pairs):
-            results[dataset_name]['pairwise'][(band1, band2)]['first_moment']['adjusted_p_value'] = adjusted_first[i]
-            results[dataset_name]['pairwise'][(band1, band2)]['second_moment']['adjusted_p_value'] = adjusted_second[i]
-            results[dataset_name]['pairwise'][(band1, band2)]['distribution']['adjusted_p_value'] = adjusted_distribution[i]
-            
-            print(f"    {band1} vs {band2}:")
-            print(f"      Mann-Whitney: {adjusted_first[i]:.2e}")
-            print(f"      Mood's Median: {adjusted_second[i]:.2e}")
-            print(f"      KS test: {adjusted_distribution[i]:.2e}")
-    
-    # 5. Visualization
-    print("\n" + "-"*80)
-    print("STEP 5: VISUALIZATION")
-    print("-"*80)
-    print("Generating comprehensive visualization plots:")
-    print("1. Median PSD across scales (with bootstrap CIs)")
-    print("2. Zoomed view of Bands 1 & 2")
-    print("3. Distribution boxplots")
-    print("4. Scale dependence ratio analysis")
-    print("5. Ratio distributions")
-
-    # Create a larger figure with more subplots
-    fig = plt.figure(figsize=(18, 15))
-    fig.suptitle('Scale Dependence Analysis (Median-Based)', fontsize=18)
-
-    # Create a grid layout
-    gs = fig.add_gridspec(3, 3)
-
-    # 1. Log scale plot of all bands
-    ax1 = fig.add_subplot(gs[0, :2])
-    x_labels = ['Band0\n(Low k)', 'Band1\n(Medium k)', 'Band2\n(High k)']
-
-    median_values_wv1 = [np.median(df_wv1[band].dropna()) for band in band_columns]
-    median_values_wv2 = [np.median(df_wv2[band].dropna()) for band in band_columns]
-
-    ci_lower_wv1 = [results['WV1']['bootstrap'][band]['median'][0] for band in band_columns]
-    ci_upper_wv1 = [results['WV1']['bootstrap'][band]['median'][1] for band in band_columns]
-    ci_lower_wv2 = [results['WV2']['bootstrap'][band]['median'][0] for band in band_columns]
-    ci_upper_wv2 = [results['WV2']['bootstrap'][band]['median'][1] for band in band_columns]
-
-    x = np.arange(len(x_labels))
-    width = 0.35
-
-    # Create log scale bar plot
-    bars1 = ax1.bar(x - width/2, median_values_wv1, width, label='WV1', alpha=0.7)
-    bars2 = ax1.bar(x + width/2, median_values_wv2, width, label='WV2', alpha=0.7)
-
-    # Add error bars
-    ax1.errorbar(x - width/2, median_values_wv1, 
-                yerr=[np.array(median_values_wv1) - np.array(ci_lower_wv1), 
-                    np.array(ci_upper_wv1) - np.array(median_values_wv1)],
-                fmt='none', color='k', capsize=5)
-
-    ax1.errorbar(x + width/2, median_values_wv2, 
-                yerr=[np.array(median_values_wv2) - np.array(ci_lower_wv2), 
-                    np.array(ci_upper_wv2) - np.array(median_values_wv2)],
-                fmt='none', color='k', capsize=5)
-
-    # Set to log scale to see all bands
-    ax1.set_yscale('log')
-    ax1.set_xticks(x)
-    ax1.set_xticklabels(x_labels)
-    ax1.set_ylabel('Median PSD (log scale)')
-    ax1.set_title('Median Power Spectral Density Across Scales\n(99% Confidence Intervals, Log Scale)')
-    ax1.legend()
-
-    # Add value annotations to the bars
-    for bar in bars1:
-        height = bar.get_height()
-        ax1.text(bar.get_x() + bar.get_width()/2., height*1.1,
-                f'{height:.1f}', ha='center', va='bottom', rotation=0, fontsize=9)
-                
-    for bar in bars2:
-        height = bar.get_height()
-        ax1.text(bar.get_x() + bar.get_width()/2., height*1.1,
-                f'{height:.1f}', ha='center', va='bottom', rotation=0, fontsize=9)
-
-    # 2. Linear scale plot focusing on bands 1 and 2 only
-    ax2 = fig.add_subplot(gs[0, 2])
-    x_labels_small = ['Band1\n(Medium k)', 'Band2\n(High k)']
-    x_small = np.arange(len(x_labels_small))
-
-    # Extract just bands 1 and 2
-    median_values_wv1_small = median_values_wv1[1:]
-    median_values_wv2_small = median_values_wv2[1:]
-    ci_lower_wv1_small = ci_lower_wv1[1:]
-    ci_upper_wv1_small = ci_upper_wv1[1:]
-    ci_lower_wv2_small = ci_lower_wv2[1:]
-    ci_upper_wv2_small = ci_upper_wv2[1:]
-
-    # Create linear scale bar plot for just bands 1 and 2
-    bars1_small = ax2.bar(x_small - width/2, median_values_wv1_small, width, label='WV1', alpha=0.7)
-    bars2_small = ax2.bar(x_small + width/2, median_values_wv2_small, width, label='WV2', alpha=0.7)
-
-    # Add error bars
-    ax2.errorbar(x_small - width/2, median_values_wv1_small, 
-                yerr=[np.array(median_values_wv1_small) - np.array(ci_lower_wv1_small), 
-                    np.array(ci_upper_wv1_small) - np.array(median_values_wv1_small)],
-                fmt='none', color='k', capsize=5)
-
-    ax2.errorbar(x_small + width/2, median_values_wv2_small, 
-                yerr=[np.array(median_values_wv2_small) - np.array(ci_lower_wv2_small), 
-                    np.array(ci_upper_wv2_small) - np.array(median_values_wv2_small)],
-                fmt='none', color='k', capsize=5)
-
-    ax2.set_xticks(x_small)
-    ax2.set_xticklabels(x_labels_small)
-    ax2.set_ylabel('Median PSD')
-    ax2.set_title('Zoomed View of Bands 1 & 2')
-    ax2.legend()
-
-    # Add value annotations
-    for bar in bars1_small:
-        height = bar.get_height()
-        ax2.text(bar.get_x() + bar.get_width()/2., height*1.05,
-                f'{height:.2f}', ha='center', va='bottom', fontsize=9)
-                
-    for bar in bars2_small:
-        height = bar.get_height()
-        ax2.text(bar.get_x() + bar.get_width()/2., height*1.05,
-                f'{height:.2f}', ha='center', va='bottom', fontsize=9)
-
-    # 3. Distribution boxplots with separate axes for each band
-    
-    # Band 0
-    ax3 = fig.add_subplot(gs[1, 0])
-    sns.boxplot(data=[df_wv1['mean_psd_band0'].dropna(), df_wv2['mean_psd_band0'].dropna()], ax=ax3, showfliers=False)
-    ax3.set_xticks([0, 1])  # Add this line
-    ax3.set_xticklabels(['WV1', 'WV2'])
-    ax3.set_ylabel('Power')
-    ax3.set_title('Band0 (Low k) Distribution')
-    ax3.set_yscale("log")
-
-    # Band 1
-    ax4 = fig.add_subplot(gs[1, 1], sharey=ax3)
-    sns.boxplot(data=[df_wv1['mean_psd_band1'].dropna(), df_wv2['mean_psd_band1'].dropna()], ax=ax4, showfliers=False)
-    ax4.set_xticks([0, 1])
-    ax4.set_xticklabels(['WV1', 'WV2'])
-    ax4.set_ylabel('Power')
-    ax4.set_title('Band1 (Medium k) Distribution')
-
-    # Band 2
-    ax5 = fig.add_subplot(gs[1, 2], sharey=ax3)
-    sns.boxplot(data=[df_wv1['mean_psd_band2'].dropna(), df_wv2['mean_psd_band2'].dropna()], ax=ax5, showfliers=False)
-    ax5.set_xticks([0, 1])
-    ax5.set_xticklabels(['WV1', 'WV2'])
-    ax5.set_ylabel('Power')
-    ax5.set_title('Band2 (High k) Distribution')
-
-    # 4. Scale dependence visualization: Band ratios (both log and linear scales)
-    ax6 = fig.add_subplot(gs[2, 0])
-
-    # Calculate ratios of medians
-    wv1_ratio_01 = np.median(df_wv1['mean_psd_band0'])/np.median(df_wv1['mean_psd_band1'])
-    wv1_ratio_12 = np.median(df_wv1['mean_psd_band1'])/np.median(df_wv1['mean_psd_band2'])
-    wv2_ratio_01 = np.median(df_wv2['mean_psd_band0'])/np.median(df_wv2['mean_psd_band1'])
-    wv2_ratio_12 = np.median(df_wv2['mean_psd_band1'])/np.median(df_wv2['mean_psd_band2'])
-
-    ratio_values = [wv1_ratio_01, wv1_ratio_12, wv2_ratio_01, wv2_ratio_12]
-
-    # Create bar plot for median ratios - Log scale
-    ratio_labels = ['WV1\nBand0/Band1', 'WV1\nBand1/Band2', 'WV2\nBand0/Band1', 'WV2\nBand1/Band2']
-    ratio_x = np.arange(len(ratio_labels))
-
-    bars_ratio = ax6.bar(ratio_x, ratio_values, alpha=0.7, 
-                        color=['blue', 'blue', 'orange', 'orange'])
-
-    ax6.set_xticks(ratio_x)
-    ax6.set_xticklabels(ratio_labels, rotation=45, ha='right')
-    ax6.set_ylabel('Ratio of Medians (log scale)')
-    ax6.set_title('Scale Dependence: Ratios of Median Power')
-    ax6.set_yscale('log')  # Use log scale to see all ratios
-
-    # Add ratio values as text
-    for i, bar in enumerate(bars_ratio):
-        height = bar.get_height()
-        ax6.text(bar.get_x() + bar.get_width()/2., height*1.1,
-                f'{ratio_values[i]:.1f}', ha='center', va='bottom', rotation=0)
-        
-    # Calculate ratios of medians and their CIs
-    wv1_ratio_01 = np.median(df_wv1['mean_psd_band0'])/np.median(df_wv1['mean_psd_band1'])
-    wv1_ratio_12 = np.median(df_wv1['mean_psd_band1'])/np.median(df_wv1['mean_psd_band2'])
-    wv2_ratio_01 = np.median(df_wv2['mean_psd_band0'])/np.median(df_wv2['mean_psd_band1'])
-    wv2_ratio_12 = np.median(df_wv2['mean_psd_band1'])/np.median(df_wv2['mean_psd_band2'])
-
-    # Calculate CIs for ratios
-    wv1_01_ci = bootstrap_ratio_confidence_intervals(
-        df_wv1['mean_psd_band0'].dropna(),
-        df_wv1['mean_psd_band1'].dropna()
-    )
-    wv1_12_ci = bootstrap_ratio_confidence_intervals(
-        df_wv1['mean_psd_band1'].dropna(),
-        df_wv1['mean_psd_band2'].dropna()
-    )
-    wv2_01_ci = bootstrap_ratio_confidence_intervals(
-        df_wv2['mean_psd_band0'].dropna(),
-        df_wv2['mean_psd_band1'].dropna()
-    )
-    wv2_12_ci = bootstrap_ratio_confidence_intervals(
-        df_wv2['mean_psd_band1'].dropna(),
-        df_wv2['mean_psd_band2'].dropna()
-    )
-
-    ratio_values = [wv1_ratio_01, wv1_ratio_12, wv2_ratio_01, wv2_ratio_12]
-    ratio_cis = [wv1_01_ci, wv1_12_ci, wv2_01_ci, wv2_12_ci]
-
-    # Add error bars to the ratio plot
-    ax6.errorbar(ratio_x, ratio_values,
-                yerr=[[r - ci[0] for r, ci in zip(ratio_values, ratio_cis)],
-                    [ci[1] - r for r, ci in zip(ratio_values, ratio_cis)]],
-                fmt='none', color='k', capsize=5)
-
-    # 5. Focus on Band1/Band2 ratios only (much smaller values)
-    ax7 = fig.add_subplot(gs[2, 1])
-
-    # Gather ratio data (element-wise for violin plots)
-    wv1_ratios_01 = df_wv1['mean_psd_band0'] / df_wv1['mean_psd_band1']
-    wv1_ratios_12 = df_wv1['mean_psd_band1'] / df_wv1['mean_psd_band2']
-    wv2_ratios_01 = df_wv2['mean_psd_band0'] / df_wv2['mean_psd_band1']
-    wv2_ratios_12 = df_wv2['mean_psd_band1'] / df_wv2['mean_psd_band2']
-
-    # Create split dataset for band0/band1 and band1/band2 separately
-    ratio_data_01 = pd.DataFrame({
-        'Ratio': np.concatenate([
-            wv1_ratios_01.dropna(), 
-            wv2_ratios_01.dropna()
-        ]),
-        'Dataset': np.concatenate([
-            np.full(len(wv1_ratios_01.dropna()), 'WV1'),
-            np.full(len(wv2_ratios_01.dropna()), 'WV2')
-        ]),
-        'Type': 'Band0/Band1'
-    })
-
-    ratio_data_12 = pd.DataFrame({
-        'Ratio': np.concatenate([
-            wv1_ratios_12.dropna(), 
-            wv2_ratios_12.dropna()
-        ]),
-        'Dataset': np.concatenate([
-            np.full(len(wv1_ratios_12.dropna()), 'WV1'),
-            np.full(len(wv2_ratios_12.dropna()), 'WV2')
-        ]),
-        'Type': 'Band1/Band2'
-    })
-
-    # Combine the data
-    ratio_data = pd.concat([ratio_data_01, ratio_data_12])
-
-    # Clip extreme values for better visualization (separately for each type)
-    for ratio_type in ['Band0/Band1', 'Band1/Band2']:
-        mask = ratio_data['Type'] == ratio_type
-        clip_upper = np.percentile(ratio_data.loc[mask, 'Ratio'], 95)
-        ratio_data.loc[mask, 'Ratio'] = np.clip(ratio_data.loc[mask, 'Ratio'], 0, clip_upper)
-
-    # Band0/Band1 plot
-    sns.violinplot(x='Dataset', y='Ratio', 
-               data=ratio_data[ratio_data['Type'] == 'Band0/Band1'],
-               ax=ax7, 
-               hue='Dataset',
-               legend=False,
-               palette=['blue', 'orange'])
-    
-    ax7.set_title('Band0/Band1 Ratios')
-    ax7.set_ylabel('Ratio Value')
-
-    # 6. Violin plots for ratio distributions in the main figure
-    ax8 = fig.add_subplot(gs[2, 2])
-
-    sns.violinplot(x='Dataset', y='Ratio', 
-               data=ratio_data[ratio_data['Type'] == 'Band1/Band2'],
-               ax=ax8, 
-               hue='Dataset',
-               legend=False, 
-               palette=['blue', 'orange'])
-    
-    ax8.set_title('Band1/Band2 Ratios')
-    ax8.set_ylabel('Ratio Value')
-
-    # Add median values as text
-    for i, (ratio_type, ax) in enumerate([('Band0/Band1', ax7), ('Band1/Band2', ax8)]):
-        for j, dataset in enumerate(['WV1', 'WV2']):
-            filtered_data = ratio_data[(ratio_data['Type'] == ratio_type) & (ratio_data['Dataset'] == dataset)]
-            median_val = np.median(filtered_data['Ratio'])
-            ax.text(j, median_val*1.05, f'Median: {median_val:.2f}', 
-                    ha='center', va='bottom', fontsize=9)
-
-    # Add text explaining what ratios mean
-    explanation_text = (
-        "Band0/Band1 Ratio: Power drop-off from large to medium scales\n"
-        "Band1/Band2 Ratio: Power drop-off from medium to small scales\n"
-        "Higher ratios = stronger scale dependence"
-    )
-    fig.text(0.5, 0.01, explanation_text, ha='center', fontsize=12, 
-            bbox=dict(facecolor='white', alpha=0.8, boxstyle='round,pad=0.5'))
-
-    plt.tight_layout(rect=[0, 0.03, 1, 0.97])
-    plt.savefig('images/scale_dependence_median_analysis.png', dpi=300)
-
-    print("\nVisualization saved as 'scale_dependence_median_analysis.png'")
-
-    # 6. Create summary DataFrame 
-    
-    # Prepare summary data
-
-    summary_columns = [
-        'Comparison', 'Dataset', 'Normality', 'Location Test', 
-        'Location p-value', 'Adjusted p-value', 'Scale Test p-value', 
-        'KS Test p-value', 'Scale Dependent?'
-    ]
-    
-    summary_data = []
-    
-    for dataset_name, df in [('WV1', df_wv1), ('WV2', df_wv2)]:
-        # Add omnibus test result
-        omnibus_result = results[dataset_name]['omnibus']
-        summary_data.append([
-            'All bands', dataset_name, 
-            'All normal' if omnibus_result['all_normal'] else 'Not all normal',
-            omnibus_result['test'], omnibus_result['p_value'], 'N/A', 'N/A', 'N/A',
-            'Yes' if omnibus_result['significant'] else 'No'
-        ])
-        
-        # Add pairwise comparison results
-        for band1, band2 in band_pairs:
-            if not omnibus_result['significant']:
-                # Skip pairwise tests if omnibus test is not significant
-                continue
-                
-            results_pair = results[dataset_name]['pairwise'][(band1, band2)]
-            both_normal = results_pair['normality']['both_normal']
-            
-            first_moment_test = results_pair['first_moment']['test']
-            first_moment_pvalue = results_pair['first_moment']['p_value']
-            first_moment_adj_pvalue = results_pair['first_moment']['adjusted_p_value']
-            
-            second_moment_test = results_pair['second_moment']['test']
-            second_moment_pvalue = results_pair['second_moment']['p_value']
-            ks_pvalue = results_pair['distribution']['p_value']
-            
-            scale_dependent = (
-                results_pair['first_moment']['significant'] or
-                results_pair['second_moment']['significant'] or
-                results_pair['distribution']['significant']
-            )
-            
-            summary_data.append([
-                f"{band1} vs {band2}", dataset_name, 
-                'Both normal' if both_normal else 'Non-normal',
-                first_moment_test, first_moment_pvalue, first_moment_adj_pvalue,
-                second_moment_pvalue, ks_pvalue,
-                'Yes' if scale_dependent else 'No'
-            ])
-    
-    summary_df = pd.DataFrame(summary_data, columns=summary_columns)
-    
-    print("\n" + "="*80)
-    print("ANALYSIS SUMMARY")
-    print("="*80)
-    print("\nKey Findings:")
-    for dataset_name, df in [('WV1', df_wv1), ('WV2', df_wv2)]:
-        print(f"\n{dataset_name}:")
-        print("  Scale Ratios (with 99% CIs):")
-        
-        ratio_01 = np.median(df['mean_psd_band0'])/np.median(df['mean_psd_band1'])
-        ratio_12 = np.median(df['mean_psd_band1'])/np.median(df['mean_psd_band2'])
-        
-        ci_01 = bootstrap_ratio_confidence_intervals(
-            df['mean_psd_band0'].dropna(),
-            df['mean_psd_band1'].dropna()
-        )
-        ci_12 = bootstrap_ratio_confidence_intervals(
-            df['mean_psd_band1'].dropna(),
-            df['mean_psd_band2'].dropna()
-        )
-        
-        print(f"    Band0/Band1: {ratio_01:.2f} [{ci_01[0]:.2f}, {ci_01[1]:.2f}]")
-        print(f"    Band1/Band2: {ratio_12:.2f} [{ci_12[0]:.2f}, {ci_12[1]:.2f}]")
-    
-    print("\nDetailed results available in returned DataFrame")
-    return results, summary_df
-
-def add_phi_nominal_to_dataset(file_path, wdir_deg_from_north, perturbed_wdir):
+def read_sar_data(filepath):
+    """Read SAR data from a given filepath."""
     try:
-        with xr.open_dataset(file_path,  engine='h5netcdf') as ds:
-            ground_heading = ds.ground_heading.values  # Raw satellite heading
-            
-            # 1. Normalize ground_heading to 0-360°
-            ground_heading = np.mod(ground_heading, 360)
-
-            # 2. Calculate true azimuth look direction (Sentinel-1 right-looking adjustment)
-            azimuth_look = np.mod(ground_heading + 90, 360)
-
-            # 3. Compute phi with both angles in 0-360° convention
-            phi_perturbed = perturbed_wdir - azimuth_look
-            phi_nominal = wdir_deg_from_north - azimuth_look
-
-            # 4. Wrap to [-180°, 180°] 
-            phi_perturbed = ((phi_perturbed + 180) % 360) - 180           
-            phi_nominal = ((phi_nominal + 180) % 360) - 180
-
-            return pd.Series({'phi_nominal_median': np.median(phi_nominal), 
-                              'phi_perturbed_median': np.median(phi_perturbed),
-                              'ground_heading_median': np.median(ground_heading),
-                              'azimuth_look_median': np.median(azimuth_look)})
+        ds = xr.open_dataset(filepath, engine='h5netcdf')
+        return ds
     except Exception as e:
-        print(f"Error processing {file_path}: {e}")
-        return pd.Series({'phi_nominal_median': np.nan, 
-                          'phi_perturbed_median': np.nan,
-                          'ground_heading_median': np.nan,
-                          'azimuth_look_median': np.nan})
-
-def perform_cmod_in_dataset(file_path, wdir_deg_from_north, perturbed_wdir, wspd):
-
-    try:
-        with xr.open_dataset(file_path) as ds:
-            
-            true_sigma0 = ds.sigma0[0].values  
-            
-            # remove last row of true_sigma0 if its full of nans
-            last_row_full_of_nans= False
-            if np.all(np.isnan(true_sigma0[-1, :])):
-                last_row_full_of_nans = True
-                true_sigma0 = true_sigma0[:-1, :]
-
-            # remove lat column of true_sigma0 if its full of nans
-            last_column_full_of_nans = False
-            if np.all(np.isnan(true_sigma0[:, -1])):
-                last_column_full_of_nans = True
-                true_sigma0 = true_sigma0[:, :-1]
-
-            # get statistics from true_sigma0
-            true_sigma0_median = np.median(true_sigma0)
-            true_sigma0_row_var = np.var(true_sigma0, axis=1)
-            true_sigma0_column_var = np.var(true_sigma0, axis=0)
-
-            true_sigma0_flatten = true_sigma0.flatten()
-            true_sigma0_skew = stats.skew(true_sigma0_flatten)
-            true_sigma0_kurtosis = stats.kurtosis(true_sigma0_flatten)
-
-            incidence = ds.incidence.values
-            ground_heading = ds.ground_heading.values  # Raw satellite heading
-            
-            # 1. Normalize ground_heading to 0-360°
-            ground_heading = np.mod(ground_heading, 360)
-            
-            if last_row_full_of_nans:
-                incidence = incidence[:-1, :]
-                ground_heading = ground_heading[:-1, :]
-
-            if last_column_full_of_nans:
-                incidence = incidence[:, :-1]
-                ground_heading = ground_heading[:, :-1]
-
-            # 2. Calculate true azimuth look direction (Sentinel-1 right-looking adjustment)
-            azimuth_look = np.mod(ground_heading + 90, 360)
-            
-            # 3. Compute phi with both angles in 0-360° convention
-            phi_perturbed = perturbed_wdir - azimuth_look
-            phi_nominal = wdir_deg_from_north - azimuth_look
-
-            # 4. Wrap to [-180°, 180°] 
-            phi_perturbed = ((phi_perturbed + 180) % 360) - 180           
-            phi_nominal = ((phi_nominal + 180) % 360) - 180
-
-            sigma0_cmod = cmod5n_forward(np.full(phi_perturbed.shape, wspd),
-                                            phi_perturbed,
-                                            incidence
-                                        )
-            # get statistics from sigma0_cmod
-            sigma0_cmod_median = np.median(sigma0_cmod)
-            sigma0_cmod_row_var = np.var(sigma0_cmod, axis=1)
-            sigma0_cmod_column_var = np.var(sigma0_cmod, axis=0)
-
-            sigma0_cmod_flatten = sigma0_cmod.flatten()
-            sigma0_cmod_skew = stats.skew(sigma0_cmod_flatten)
-            sigma0_cmod_kurtosis = stats.kurtosis(sigma0_cmod_flatten)
-             
-                         
-            # Execute CMOD5N inversion
-            wspd_cmod = cmod5n_inverse(sigma0_cmod,
-                                        phi_nominal,
-                                        incidence,
-                                        )
-            
-            
-            # Calculate statistics (handling potential NaN values)
-            wspd_flat = wspd_cmod.flatten()
-            wspd_flat = wspd_flat[~np.isnan(wspd_flat)]  # Remove NaN values for skew and kurtosis
-            
-            wspd_median = np.nanmedian(wspd_cmod)
-            wspd_var = np.nanvar(wspd_cmod)
-            
-            # Handle case where there are insufficient non-NaN values
-            if len(wspd_flat) > 3:  # Need at least a few points for meaningful skew/kurtosis
-                wspd_skewness = stats.skew(wspd_flat)
-                wspd_kurtosis = stats.kurtosis(wspd_flat)
-            else:
-                wspd_skewness = np.nan
-                wspd_kurtosis = np.nan
-                
-            return pd.Series([true_sigma0_median, true_sigma0_row_var, 
-                              true_sigma0_column_var, true_sigma0_skew, 
-                              true_sigma0_kurtosis, sigma0_cmod_median,
-                              sigma0_cmod_row_var, sigma0_cmod_column_var,
-                              sigma0_cmod_skew, sigma0_cmod_kurtosis,
-                              wspd_median, wspd_var, wspd_skewness, wspd_kurtosis])
-                              
-    except Exception as e:
-        print(f"Error processing {file_path}: {str(e)}")
-        return pd.Series([np.nan, np.nan, np.nan, np.nan,
-                          np.nan, np.nan, np.nan, np.nan,
-                          np.nan, np.nan, np.nan, np.nan,
-                          np.nan, np.nan])
-        
-def add_direction_uncertainty(wdir_era5, sigma=30):
-    """Add Gaussian noise to wind direction (deg)"""
-    noise = np.random.normal(0, sigma, size=wdir_era5.shape)
-    return np.mod(wdir_era5 + noise, 360)
-
-def plot_sar_wind(df_wv1_unstable_gt15, idx, cmod5n_inverse):
-    """
-    Plot SAR wind data with CMOD-derived wind speed, sigma0, and PSD.
-    
-    Parameters:
-    -----------
-    df_wv1_unstable_gt15 : pandas.DataFrame
-        DataFrame containing SAR metadata
-    idx : int
-        Index of the record to plot
-    cmod5n_inverse : function
-        Function to calculate wind speed from SAR data
-        
-    Returns:
-    --------
-    fig : matplotlib.figure.Figure
-        The created figure object
-    """
-    
-    # Extract data for the given index
-    fn = df_wv1_unstable_gt15.renamed_filename.iloc[idx]
-    path_to_data = df_wv1_unstable_gt15.path_to_sar_file.iloc[idx]
-    
-    wdir_rad = df_wv1_unstable_gt15.wdir.iloc[idx]
-    wdir_deg_from_north = np.rad2deg(wdir_rad) % 360
-    wspd_era5 = df_wv1_unstable_gt15.wspd.iloc[idx]
-    
-    # Load SAR data
-    ds = xr.open_dataset(path_to_data, engine='h5netcdf')
-    sigma0 = ds['sigma0'][0]
-    incidence_angle = ds['incidence'].values
-    ground_heading = ds['ground_heading'].values
-    
-    # Calculate relative wind direction
-    phi = wdir_deg_from_north - ground_heading
-    phi = np.mod(phi + 180, 360) - 180
-    
-    # Calculate CMOD wind speed
-    wspd_cmod = cmod5n_inverse(sigma0, phi, incidence_angle, iterations=10)
-    
-    # Create 1x3 plot layout
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-    
-    # Plot 1: CMOD derived wind speed with wind direction arrow
-    im1 = axes[0].imshow(wspd_cmod)
-    cbar1 = plt.colorbar(im1, ax=axes[0], label="Wind Speed [m/s]")
-    axes[0].set_title(f"CMOD5n Wind Speed\nMedian = {np.nanmedian(wspd_cmod):.2f} m/s")
-    
-    # Get center of the image
-    center_y, center_x = np.array(wspd_cmod.shape) / 2
-    
-    arrow_angle_rad = np.deg2rad(wdir_deg_from_north + 180)
-    dx = np.sin(arrow_angle_rad)  
-    dy = -np.cos(arrow_angle_rad)  
-    
-    # Draw arrow
-    arrow_length = min(wspd_cmod.shape) / 6  
-    axes[0].arrow(center_x, center_y, dx * arrow_length, dy * arrow_length, 
-                  head_width=arrow_length/3, head_length=arrow_length/2, 
-                  fc='k', ec='k', linewidth=2)
-    
-    # Add North indicator for reference
-    axes[0].text(0.02, 0.98, "N↑", transform=axes[0].transAxes, 
-                 fontsize=12, fontweight='bold', va='top')
-    
-    # Plot 2: Sigma0
-    im2 = axes[1].imshow(sigma0)
-    cbar2 = plt.colorbar(im2, ax=axes[1], label="Sigma0 [linear]")
-    axes[1].set_title("Sigma0 (Normalized Radar Cross Section)")
-    
-    # Plot 3: PSD of sigma0
-    # Calculate 2D Power Spectral Density
-    sigma0_clean = np.nan_to_num(sigma0)  
-    
-    # First, compute 2D FFT and shift zero frequency to center
-    f_sigma0 = np.fft.fft2(sigma0_clean)
-    f_sigma0_shifted = np.fft.fftshift(f_sigma0)
-    psd_2d = np.abs(f_sigma0_shifted)**2
-    
-    # Plot PSD (log scale is often better for visualizing PSD)
-    im3 = axes[2].imshow(np.log10(psd_2d + 1e-10)) 
-    cbar3 = plt.colorbar(im3, ax=axes[2], label="Log10 PSD")
-    axes[2].set_title("Power Spectral Density of Sigma0")
-    
-    # Add annotation for wind direction and ERA5 speed
-    info_text = f"Wind Direction: {wdir_deg_from_north:.1f}°\nERA5 Wind Speed: {wspd_era5:.2f} m/s"
-    axes[0].text(0.02, 0.02, info_text, transform=axes[0].transAxes, 
-                 bbox=dict(facecolor='white', alpha=0.7), fontsize=10, va='bottom')
-    
-    plt.tight_layout()
-    
-    return fig
-
-def compute_spectral_wind_errors(file_path, era5_wind_speed, wdir_nominal, perturbed_wdir=None, perturbation_sigma=30):
-    """
-    Compute wind speed errors across different spectral bands using the forward-inverse CMOD approach.
-    
-    Parameters:
-    -----------
-    file_path : str
-        Path to the SAR data file
-    era5_wind_speed : float
-        Single ERA5 wind speed value for the entire scene
-    wdir_nominal : float
-        Nominal wind direction in degrees
-    perturbed_wdir : float, optional
-        Perturbed wind direction. If None, will add Gaussian noise to wdir_nominal
-    perturbation_sigma : float, default=30
-        Standard deviation for Gaussian perturbation if perturbed_wdir is None
-        
-    Returns:
-    --------
-    dict
-        Dictionary containing error metrics for each spectral band
-    """
-    try:
-        # Open dataset and extract data
-        with xr.open_dataset(file_path) as ds:
-            sigma0_values = ds.sigma0.values
-            ground_heading = ds.ground_heading.values
-            incidence = ds.incidence.values
-
-            if sigma0_values.ndim == 3:
-                sigma0_values = sigma0_values[0]
-                        
-            # Clean NaN rows/columns if needed
-            if np.isnan(sigma0_values[-1, :]).all():
-                sigma0_values = sigma0_values[:-1, :]
-                ground_heading = ground_heading[:-1, :]
-                incidence = incidence[:-1, :]
-
-            if np.isnan(sigma0_values[:, -1]).all():
-                sigma0_values = sigma0_values[:, :-1]
-                ground_heading = ground_heading[:, :-1]
-                incidence = incidence[:, :-1]
-            
-            # Generate perturbed wind direction if not provided
-            if perturbed_wdir is None:
-                noise = np.random.normal(0, perturbation_sigma)
-                perturbed_wdir = np.mod(wdir_nominal + noise, 360)
-            
-            # Calculate phi angles
-            azimuth_look = np.mod(ground_heading + 90, 360)
-            phi_nominal = wdir_nominal - azimuth_look
-            phi_perturbed = perturbed_wdir - azimuth_look
-            
-            # Wrap to [-180°, 180°]
-            phi_nominal = ((phi_nominal + 180) % 360) - 180
-            phi_perturbed = ((phi_perturbed + 180) % 360) - 180
-            
-            # Forward model: Generate simulated sigma0 using perturbed direction
-            sigma0_cmod = cmod5n_forward(np.full(phi_perturbed.shape, era5_wind_speed),
-                                         phi_perturbed,
-                                         incidence)
-        
-        # Compute 2D Fourier transform and power spectrum of the simulated sigma0
-        fft_data = np.fft.fft2(sigma0_cmod)
-        psd_2d = np.abs(fft_data)**2
-        
-        # Set up frequency grid
-        freq_x = np.fft.fftfreq(sigma0_cmod.shape[1])
-        freq_y = np.fft.fftfreq(sigma0_cmod.shape[0])
-        kx, ky = np.meshgrid(freq_x, freq_y)
-        k_magnitude = np.sqrt(kx**2 + ky**2)
-        
-        # Define wavenumber bands
-        k_bands = [
-            (0, 0.1),     # Band 0: Low wavenumbers (large scales)
-            (0.1, 0.3),   # Band 1: Medium wavenumbers
-            (0.3, np.inf) # Band 2: High wavenumbers (small scales)
-        ]
-        
-        results = {
-            # 'true_sigma0_median': np.median(sigma0_values),
-            # 'sigma0_cmod_median': np.median(sigma0_cmod),
-            # 'sigma0_norm_error': (np.median(sigma0_cmod) - np.median(sigma0_values)) / np.median(sigma0_values),
-            # 'wdir_nominal': wdir_nominal,
-            # 'wdir_perturbed': perturbed_wdir
-        }
-        
-        # Process each band
-        for i, (k_min, k_max) in enumerate(k_bands):
-            mask = (k_magnitude >= k_min) & (k_magnitude < k_max)
-            
-            if np.any(mask):
-                # Create filtered version of simulated sigma0 for this band
-                fft_filtered = np.zeros_like(fft_data)
-                fft_filtered[mask] = fft_data[mask]
-                sigma0_filtered = np.real(np.fft.ifft2(fft_filtered))
-                
-                # Inverse model: Retrieve wind speed using nominal direction
-                wspd_band = cmod5n_inverse(sigma0_filtered, phi_nominal, incidence)
-                
-                # Calculate error metrics
-                error = wspd_band - era5_wind_speed
-                abs_error = np.abs(error)
-                rel_error = error / era5_wind_speed
-                
-                results[f'band{i}_wspd_mean'] = np.nanmean(wspd_band)
-                results[f'band{i}_wspd_median'] = np.nanmedian(wspd_band)
-                results[f'band{i}_error_mean'] = np.nanmean(error)
-                results[f'band{i}_error_median'] = np.nanmedian(error) 
-                results[f'band{i}_abs_error_mean'] = np.nanmean(abs_error)
-                results[f'band{i}_rel_error_mean'] = np.nanmean(rel_error)
-                results[f'band{i}_rmse'] = np.sqrt(np.nanmean(error**2))
-        
-        return results
-        
-    except Exception as e:
-        print(f"Error processing {file_path}: {str(e)}")
+        print(f"Error reading SAR data: {e}")
         return None
 
+def coupled_perturbation(wspd, wdir, seed=None, factor=1.0):
+    """
+    Perturb wind speed and direction using a coupled error model.
+    
+    Implements:
+    speed_error = 0.1*wspd + 0.25*max(0,wspd-15)
+    dir_error = max(5, 20-wspd/2)
+    
+    Parameters:
+    -----------
+    wspd : float
+        Wind speed to perturb
+    wdir : float
+        Wind direction to perturb
+    seed : int, optional
+        Random seed for reproducibility
+    factor : float, optional
+        Scaling factor for perturbation magnitude
+    
+    Returns:
+    --------
+    wspd_perturbed, wdir_perturbed : tuple of float
+        Perturbed wind speed and direction
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    
+    # Compute error magnitudes based on wind speed
+    speed_error = factor * (0.1 * wspd + 0.25 * np.maximum(0, wspd - 15))
+    dir_error = factor * np.maximum(5, 20 - wspd / 2)
+    
+    # Generate random errors with appropriate standard deviations
+    wspd_noise = np.random.normal(0, speed_error)
+    wdir_noise = np.random.normal(0, dir_error)
+    
+    # Apply perturbations
+    wspd_perturbed = wspd + wspd_noise
+    wspd_perturbed = np.maximum(0, wspd_perturbed)  # Ensure non-negative wind speed
+    wdir_perturbed = np.mod(wdir + wdir_noise, 360)  # Keep direction in [0, 360)
+    
+    return wspd_perturbed, wdir_perturbed
+
+def compute_phi(wdir, azimuth_look):
+    """Compute phi (relative wind direction) from wind direction and azimuth look angle."""
+    phi = wdir - azimuth_look
+    # Wrap to [-180, 180]
+    phi = np.mod(phi + 180, 360) - 180
+    return phi
+
+def cmod5n_forward(wspd, phi, incidence):
+    """CMOD5N forward model to compute sigma0 from wind parameters."""
+    try:
+        from utils.cmod5n import cmod5n_forward
+        return cmod5n_forward(np.full(phi.shape, wspd), phi, incidence)
+    except ImportError:
+        try:
+            from utils.cmod5n import cmod5n_forward
+            return cmod5n_forward(np.full(phi.shape, wspd), phi, incidence)
+        except ImportError:
+            print("Warning: No CMOD5N module found.")
+            # Simplified approximation
+            phi_rad = np.deg2rad(phi)
+            inc_rad = np.deg2rad(incidence)
+            return 0.1 * (1 + np.cos(phi_rad)) * wspd**0.5 * np.exp(-0.1 * inc_rad)
+
+def cmod5n_inverse(sigma0, phi, incidence):
+    """CMOD5N inverse model to compute wind speed from sigma0."""
+    try:
+        from utils.cmod5n import cmod5n_inverse
+        return cmod5n_inverse(sigma0, phi, incidence)
+    except ImportError:
+        try:
+            from utils.cmod5n import cmod5n_inverse
+            return cmod5n_inverse(sigma0, phi, incidence,)
+        except ImportError:
+            print("Warning: No CMOD5N module found.")
+            # Simplified approximation
+            phi_rad = np.deg2rad(phi)
+            inc_rad = np.deg2rad(incidence)
+            return np.sqrt(sigma0 / (0.1 * (1 + np.cos(phi_rad)) * np.exp(-0.1 * inc_rad)))
+
+def compute_2d_fft(sigma0):
+    """Compute 2D FFT of sigma0 values."""
+    # Clean NaN values
+    sigma0_clean = sigma0.copy()
+    if np.isnan(sigma0_clean).any():
+        sigma0_clean[np.isnan(sigma0_clean)] = 0
+    
+    # Compute 2D FFT
+    fft_data = np.fft.fft2(sigma0_clean)
+    psd_2d = np.abs(fft_data)**2
+    
+    # Compute wavenumbers
+    freqx = np.fft.fftfreq(sigma0.shape[1])
+    freqy = np.fft.fftfreq(sigma0.shape[0])
+    kx, ky = np.meshgrid(freqx, freqy)
+    kmagnitude = np.sqrt(kx**2 + ky**2)
+    
+    return fft_data, psd_2d, kx, ky, kmagnitude
+
+def band_filter(fft_data, kmagnitude, kmin, kmax):
+    """Apply band-pass filter to FFT data."""
+    # Create mask for band-pass filter
+    mask = (kmagnitude >= kmin) & (kmagnitude < kmax)
+    
+    # Apply filter in frequency domain
+    fft_filtered = np.zeros_like(fft_data, dtype=complex)
+    fft_filtered[mask] = fft_data[mask]
+    
+    # Invert back to spatial domain
+    filtered_sigma0 = np.real(np.fft.ifft2(fft_filtered))
+    
+    return filtered_sigma0
+
+def calculate_error_metrics(retrieved_wspd, true_wspd):
+    """Calculate error metrics between retrieved and true wind speeds."""
+    # Handle NaN values
+    
+    if hasattr(retrieved_wspd, 'flatten'):
+        retrieved_wspd = retrieved_wspd.flatten()
+    
+    mask = ~np.isnan(retrieved_wspd)
+    retrieved_wspd_clean = retrieved_wspd[mask]
+    
+    if isinstance(true_wspd, (int, float)):
+        true_wspd_clean = np.full_like(retrieved_wspd_clean, true_wspd)
+    else:
+        if hasattr(true_wspd, 'flatten'):
+            true_wspd = true_wspd.flatten()
+        true_wspd_clean = true_wspd[mask]
+    
+    # Calculate errors
+    error = retrieved_wspd_clean - true_wspd_clean
+    abs_error = np.abs(error)
+    rel_error = error / true_wspd_clean
+    
+    # Calculate metrics
+    bias = np.mean(error)
+    rmse = np.sqrt(np.mean(error**2))
+    mean_abs_error = np.mean(abs_error)
+    mean_rel_error = np.mean(rel_error)
+    
+    return {
+        'bias': bias,
+        'rmse': rmse,
+        'abs_error': mean_abs_error,
+        'rel_error': mean_rel_error
+    }
+
+def calculate_sigma0_comparison_metrics(obs_sigma0, model_sigma0):
+    """Calculate comparison metrics between observed and modeled sigma0."""
+    # Handle NaN values
+    if hasattr(obs_sigma0, 'flatten'):
+        obs_sigma0 = obs_sigma0.flatten()
+    if hasattr(model_sigma0, 'flatten'):
+        model_sigma0 = model_sigma0.flatten()
+    
+    mask = ~(np.isnan(obs_sigma0) | np.isnan(model_sigma0))
+    obs_sigma0_clean = obs_sigma0[mask]
+    model_sigma0_clean = model_sigma0[mask]
+    
+    # Calculate metrics
+    diff = obs_sigma0_clean - model_sigma0_clean
+    
+    # Handle potential division by zero in ratio calculation
+    ratio = np.zeros_like(obs_sigma0_clean)
+    nonzero_mask = obs_sigma0_clean != 0
+    ratio[nonzero_mask] = model_sigma0_clean[nonzero_mask] / obs_sigma0_clean[nonzero_mask]
+    
+    # Filter out inf and nan in ratio
+    ratio = ratio[~np.isinf(ratio) & ~np.isnan(ratio)]
+    
+    # Calculate statistics
+    bias = np.mean(diff)
+    rmse = np.sqrt(np.mean(diff**2))
+    mean_ratio = np.mean(ratio)
+    
+    return {
+        'bias': bias,
+        'rmse': rmse,
+        'mean_ratio': mean_ratio
+    }
+
+def calculate_spectral_coherence(obs_sigma0, model_sigma0, kmagnitude, band_ranges):
+    # Break signals into segments and apply windowing
+    # For demonstration, assuming segmentation has been applied
+    
+    # Calculate cross-spectral density
+    cross_spectrum = np.mean(fft_obs * np.conj(fft_model), axis=0)
+    
+    # Calculate auto-spectral densities
+    power_spectrum_obs = np.mean(np.abs(fft_obs)**2, axis=0)
+    power_spectrum_model = np.mean(np.abs(fft_model)**2, axis=0)
+    
+    # Calculate coherence
+    coherence_squared = np.abs(cross_spectrum)**2 / (power_spectrum_obs * power_spectrum_model)
+    
+    # Calculate band-specific coherence
+    band_coherence = {}
+    for band_name, (kmin, kmax) in band_ranges.items():
+        band_mask = (kmagnitude >= kmin) & (kmagnitude < kmax)
+        band_coherence[band_name] = np.mean(coherence_squared[band_mask])
+    
+    return band_coherence
+
+def calculate_scale_dependent_sensitivity(band0_cmod, band1_cmod, band2_cmod, 
+                                         band0_cmod_strong, band1_cmod_strong, band2_cmod_strong,
+                                         wspd_perturbed, wspd_perturbed_strong):
+    """Calculate scale-dependent sensitivity of modeled sigma0 to wind changes."""
+    # Calculate wind speed difference
+    wspd_diff = wspd_perturbed_strong - wspd_perturbed
+    
+    # Calculate sensitivity for each band
+    sensitivity_band0 = np.nanmean((band0_cmod_strong - band0_cmod)) / wspd_diff
+    sensitivity_band1 = np.nanmean((band1_cmod_strong - band1_cmod)) / wspd_diff
+    sensitivity_band2 = np.nanmean((band2_cmod_strong - band2_cmod)) / wspd_diff
+    
+    return {
+        'band0': sensitivity_band0,
+        'band1': sensitivity_band1,
+        'band2': sensitivity_band2
+    }
+
+def kruskal_wallis_test(errors_band0, errors_band1, errors_band2):
+    """Perform Kruskal-Wallis test to detect significant differences across bands."""
+    # Remove NaN values
+    errors_band0 = np.array(errors_band0)[~np.isnan(errors_band0)]
+    errors_band1 = np.array(errors_band1)[~np.isnan(errors_band1)]
+    errors_band2 = np.array(errors_band2)[~np.isnan(errors_band2)]
+    
+    # Perform Kruskal-Wallis test
+    statistic, p_value = kruskal(errors_band0, errors_band1, errors_band2)
+    
+    return statistic, p_value, p_value < 0.05
+
+def perform_statistical_tests(df_results):
+    """
+    Perform statistical tests to determine if there are significant differences
+    across wavenumber bands for various metrics.
+    
+    Parameters:
+    -----------
+    df_results : pandas.DataFrame
+        DataFrame containing the analysis results
+        
+    Returns:
+    --------
+    dict
+        Dictionary with test results for different metrics
+    """
+    # Initialize results dictionary
+    test_results = {}
+    
+    # 1. Transfer function ratios
+    ratio0 = df_results['ratio_band0']
+    ratio1 = df_results['ratio_band1']
+    ratio2 = df_results['ratio_band2']
+    
+    # Check if we have at least two different values before running Kruskal-Wallis
+    ratio_values = np.concatenate([ratio0.dropna().values, ratio1.dropna().values, ratio2.dropna().values])
+    if len(np.unique(ratio_values)) <= 1:
+        # All values are identical, can't run Kruskal-Wallis
+        test_results['transfer_ratio'] = {
+            'statistic': np.nan,
+            'p_value': 1.0,
+            'significant': False
+        }
+    else:
+        # Kruskal-Wallis test for ratios
+        try:
+            ratio_statistic, ratio_p_value = kruskal(
+                ratio0.dropna(), 
+                ratio1.dropna(), 
+                ratio2.dropna()
+            )
+            
+            test_results['transfer_ratio'] = {
+                'statistic': ratio_statistic,
+                'p_value': ratio_p_value,
+                'significant': ratio_p_value < 0.05
+            }
+        except ValueError as e:
+            print(f"Warning: Error in transfer_ratio Kruskal-Wallis test: {e}")
+            test_results['transfer_ratio'] = {
+                'statistic': np.nan,
+                'p_value': 1.0,
+                'significant': False
+            }
+    
+    # Pairwise tests for ratios using Mann-Whitney U
+    ratio_pairs = []
+    test_results['transfer_ratio_pairwise'] = {}
+    
+    # Only do pairwise tests if we have different values
+    if len(np.unique(ratio_values)) > 1:
+        try:
+            ratio_pairs = [
+                ('band0_band1', stats.mannwhitneyu(ratio0.dropna(), ratio1.dropna())),
+                ('band0_band2', stats.mannwhitneyu(ratio0.dropna(), ratio2.dropna())),
+                ('band1_band2', stats.mannwhitneyu(ratio1.dropna(), ratio2.dropna()))
+            ]
+            
+            # Apply Bonferroni correction for multiple comparisons
+            p_values = [pair[1].pvalue for pair in ratio_pairs]
+            reject, p_adjusted, _, _ = multipletests(p_values, method='bonferroni')
+            
+            test_results['transfer_ratio_pairwise'] = {
+                pair[0]: {
+                    'statistic': pair[1].statistic,
+                    'p_value': pair[1].pvalue,
+                    'p_adjusted': p_adj,
+                    'significant': rej
+                }
+                for pair, p_adj, rej in zip(ratio_pairs, p_adjusted, reject)
+            }
+        except Exception as e:
+            print(f"Warning: Error in transfer_ratio pairwise tests: {e}")
+            for pair_name in ['band0_band1', 'band0_band2', 'band1_band2']:
+                test_results['transfer_ratio_pairwise'][pair_name] = {
+                    'statistic': np.nan,
+                    'p_value': 1.0,
+                    'p_adjusted': 1.0,
+                    'significant': False
+                }
+    else:
+        for pair_name in ['band0_band1', 'band0_band2', 'band1_band2']:
+            test_results['transfer_ratio_pairwise'][pair_name] = {
+                'statistic': np.nan,
+                'p_value': 1.0,
+                'p_adjusted': 1.0,
+                'significant': False
+            }
+    
+    # 2. Spectral coherence
+    coherence0 = df_results['coherence_metrics'].apply(lambda x: x['band0'])
+    coherence1 = df_results['coherence_metrics'].apply(lambda x: x['band1'])
+    coherence2 = df_results['coherence_metrics'].apply(lambda x: x['band2'])
+    
+    # Check if we have at least two different values before running Kruskal-Wallis
+    coherence_values = np.concatenate([coherence0.dropna().values, coherence1.dropna().values, coherence2.dropna().values])
+    if len(np.unique(coherence_values)) <= 1:
+        # All values are identical, can't run Kruskal-Wallis
+        test_results['spectral_coherence'] = {
+            'statistic': np.nan,
+            'p_value': 1.0,
+            'significant': False
+        }
+    else:
+        # Kruskal-Wallis test for coherence
+        try:
+            coherence_statistic, coherence_p_value = kruskal(
+                coherence0.dropna(),
+                coherence1.dropna(),
+                coherence2.dropna()
+            )
+            
+            test_results['spectral_coherence'] = {
+                'statistic': coherence_statistic,
+                'p_value': coherence_p_value,
+                'significant': coherence_p_value < 0.05
+            }
+        except ValueError as e:
+            print(f"Warning: Error in spectral_coherence Kruskal-Wallis test: {e}")
+            test_results['spectral_coherence'] = {
+                'statistic': np.nan,
+                'p_value': 1.0,
+                'significant': False
+            }
+    
+    # Pairwise tests for coherence
+    test_results['spectral_coherence_pairwise'] = {}
+    
+    # Only do pairwise tests if we have different values
+    if len(np.unique(coherence_values)) > 1:
+        try:
+            coherence_pairs = [
+                ('band0_band1', stats.mannwhitneyu(coherence0.dropna(), coherence1.dropna())),
+                ('band0_band2', stats.mannwhitneyu(coherence0.dropna(), coherence2.dropna())),
+                ('band1_band2', stats.mannwhitneyu(coherence1.dropna(), coherence2.dropna()))
+            ]
+            
+            p_values = [pair[1].pvalue for pair in coherence_pairs]
+            reject, p_adjusted, _, _ = multipletests(p_values, method='bonferroni')
+            
+            test_results['spectral_coherence_pairwise'] = {
+                pair[0]: {
+                    'statistic': pair[1].statistic,
+                    'p_value': pair[1].pvalue,
+                    'p_adjusted': p_adj,
+                    'significant': rej
+                }
+                for pair, p_adj, rej in zip(coherence_pairs, p_adjusted, reject)
+            }
+        except Exception as e:
+            print(f"Warning: Error in spectral_coherence pairwise tests: {e}")
+            for pair_name in ['band0_band1', 'band0_band2', 'band1_band2']:
+                test_results['spectral_coherence_pairwise'][pair_name] = {
+                    'statistic': np.nan,
+                    'p_value': 1.0,
+                    'p_adjusted': 1.0,
+                    'significant': False
+                }
+    else:
+        for pair_name in ['band0_band1', 'band0_band2', 'band1_band2']:
+            test_results['spectral_coherence_pairwise'][pair_name] = {
+                'statistic': np.nan,
+                'p_value': 1.0,
+                'p_adjusted': 1.0,
+                'significant': False
+            }
+    
+    # 3. Sensitivity metrics
+    sensitivity0 = df_results['sensitivity_metrics'].apply(lambda x: x['band0'])
+    sensitivity1 = df_results['sensitivity_metrics'].apply(lambda x: x['band1'])
+    sensitivity2 = df_results['sensitivity_metrics'].apply(lambda x: x['band2'])
+    
+    # Check if we have at least two different values before running Kruskal-Wallis
+    sensitivity_values = np.concatenate([sensitivity0.dropna().values, sensitivity1.dropna().values, sensitivity2.dropna().values])
+    if len(np.unique(sensitivity_values)) <= 1:
+        # All values are identical, can't run Kruskal-Wallis
+        test_results['sensitivity'] = {
+            'statistic': np.nan,
+            'p_value': 1.0,
+            'significant': False
+        }
+    else:
+        # Kruskal-Wallis test for sensitivity
+        try:
+            sensitivity_statistic, sensitivity_p_value = kruskal(
+                sensitivity0.dropna(),
+                sensitivity1.dropna(),
+                sensitivity2.dropna()
+            )
+            
+            test_results['sensitivity'] = {
+                'statistic': sensitivity_statistic,
+                'p_value': sensitivity_p_value,
+                'significant': sensitivity_p_value < 0.05
+            }
+        except ValueError as e:
+            print(f"Warning: Error in sensitivity Kruskal-Wallis test: {e}")
+            test_results['sensitivity'] = {
+                'statistic': np.nan,
+                'p_value': 1.0,
+                'significant': False
+            }
+    
+    # Pairwise tests for sensitivity
+    test_results['sensitivity_pairwise'] = {}
+    
+    # Only do pairwise tests if we have different values
+    if len(np.unique(sensitivity_values)) > 1:
+        try:
+            sensitivity_pairs = [
+                ('band0_band1', stats.mannwhitneyu(sensitivity0.dropna(), sensitivity1.dropna())),
+                ('band0_band2', stats.mannwhitneyu(sensitivity0.dropna(), sensitivity2.dropna())),
+                ('band1_band2', stats.mannwhitneyu(sensitivity1.dropna(), sensitivity2.dropna()))
+            ]
+            
+            p_values = [pair[1].pvalue for pair in sensitivity_pairs]
+            reject, p_adjusted, _, _ = multipletests(p_values, method='bonferroni')
+            
+            test_results['sensitivity_pairwise'] = {
+                pair[0]: {
+                    'statistic': pair[1].statistic,
+                    'p_value': pair[1].pvalue,
+                    'p_adjusted': p_adj,
+                    'significant': rej
+                }
+                for pair, p_adj, rej in zip(sensitivity_pairs, p_adjusted, reject)
+            }
+        except Exception as e:
+            print(f"Warning: Error in sensitivity pairwise tests: {e}")
+            for pair_name in ['band0_band1', 'band0_band2', 'band1_band2']:
+                test_results['sensitivity_pairwise'][pair_name] = {
+                    'statistic': np.nan,
+                    'p_value': 1.0,
+                    'p_adjusted': 1.0,
+                    'significant': False
+                }
+    else:
+        for pair_name in ['band0_band1', 'band0_band2', 'band1_band2']:
+            test_results['sensitivity_pairwise'][pair_name] = {
+                'statistic': np.nan,
+                'p_value': 1.0,
+                'p_adjusted': 1.0,
+                'significant': False
+            }
+    
+    # 4. Cross-scale analysis
+    bias0 = df_results['errors_band0'].apply(lambda x: x['bias'])
+    bias1 = df_results['errors_band1'].apply(lambda x: x['bias'])
+    bias2 = df_results['errors_band2'].apply(lambda x: x['bias'])
+    cross_bias_model0_obs12 = df_results['errors_cross_model0_obs12'].apply(lambda x: x['bias'])
+    cross_bias_obs0_model12 = df_results['errors_cross_obs0_model12'].apply(lambda x: x['bias'])
+    
+    # Check if we have at least two different values before running Kruskal-Wallis
+    cross_scale_values = np.concatenate([
+        bias0.dropna().values, 
+        bias1.dropna().values, 
+        bias2.dropna().values,
+        cross_bias_model0_obs12.dropna().values,
+        cross_bias_obs0_model12.dropna().values
+    ])
+    
+    if len(np.unique(cross_scale_values)) <= 1:
+        # All values are identical, can't run Kruskal-Wallis
+        test_results['cross_scale'] = {
+            'statistic': np.nan,
+            'p_value': 1.0,
+            'significant': False
+        }
+    else:
+        # Kruskal-Wallis test for cross-scale analysis
+        try:
+            cross_scale_statistic, cross_scale_p_value = kruskal(
+                bias0.dropna(),
+                bias1.dropna(),
+                bias2.dropna(),
+                cross_bias_model0_obs12.dropna(),
+                cross_bias_obs0_model12.dropna()
+            )
+            
+            test_results['cross_scale'] = {
+                'statistic': cross_scale_statistic,
+                'p_value': cross_scale_p_value,
+                'significant': cross_scale_p_value < 0.05
+            }
+        except ValueError as e:
+            print(f"Warning: Error in cross_scale Kruskal-Wallis test: {e}")
+            test_results['cross_scale'] = {
+                'statistic': np.nan,
+                'p_value': 1.0,
+                'significant': False
+            }
+    
+    # Pairwise tests focusing on cross-scale combinations vs regular bands
+    test_results['cross_scale_pairwise'] = {}
+    
+    # Only do pairwise tests if we have different values
+    if len(np.unique(cross_scale_values)) > 1:
+        try:
+            cross_scale_pairs = [
+                ('band0_model0_obs12', stats.mannwhitneyu(bias0.dropna(), cross_bias_model0_obs12.dropna())),
+                ('band0_obs0_model12', stats.mannwhitneyu(bias0.dropna(), cross_bias_obs0_model12.dropna())),
+                ('model0_obs12_obs0_model12', stats.mannwhitneyu(cross_bias_model0_obs12.dropna(), cross_bias_obs0_model12.dropna()))
+            ]
+            
+            p_values = [pair[1].pvalue for pair in cross_scale_pairs]
+            reject, p_adjusted, _, _ = multipletests(p_values, method='bonferroni')
+            
+            test_results['cross_scale_pairwise'] = {
+                pair[0]: {
+                    'statistic': pair[1].statistic,
+                    'p_value': pair[1].pvalue,
+                    'p_adjusted': p_adj,
+                    'significant': rej
+                }
+                for pair, p_adj, rej in zip(cross_scale_pairs, p_adjusted, reject)
+            }
+        except Exception as e:
+            print(f"Warning: Error in cross_scale pairwise tests: {e}")
+            for pair_name in ['band0_model0_obs12', 'band0_obs0_model12', 'model0_obs12_obs0_model12']:
+                test_results['cross_scale_pairwise'][pair_name] = {
+                    'statistic': np.nan,
+                    'p_value': 1.0,
+                    'p_adjusted': 1.0,
+                    'significant': False
+                }
+    else:
+        for pair_name in ['band0_model0_obs12', 'band0_obs0_model12', 'model0_obs12_obs0_model12']:
+            test_results['cross_scale_pairwise'][pair_name] = {
+                'statistic': np.nan,
+                'p_value': 1.0,
+                'p_adjusted': 1.0,
+                'significant': False
+            }
+    
+    return test_results
+
+def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
+    """Process a single SAR file according to the workflow."""
+    try:
+        # Read SAR data
+        sar_ds = read_sar_data(sar_filepath)
+        if sar_ds is None:
+            return None
+        
+        # Extract SAR data
+        sigma_sar = sar_ds.sigma0.values
+        incidence = sar_ds.incidence.values
+        ground_heading = sar_ds.ground_heading.values
+
+        if sigma_sar.ndim == 3:
+            sigma_sar = sigma_sar[0]  # Take first slice if 3D
+        
+        # Clean NaN rows/columns
+        if np.isnan(sigma_sar[-1, :]).all():
+            sigma_sar = sigma_sar[:-1, :]
+            incidence = incidence[:-1, :]
+            ground_heading = ground_heading[:-1, :]
+
+        if np.isnan(sigma_sar[:, -1]).all():
+            sigma_sar = sigma_sar[:, :-1]
+            incidence = incidence[:, :-1]
+            ground_heading = ground_heading[:, :-1]
+                
+        # Normalize ground_heading to 0-360
+        ground_heading = np.mod(ground_heading, 360)
+        
+        # Calculate azimuth look angle (Sentinel-1 is right-looking)
+        azimuth_look = np.mod(ground_heading + 90, 360)
+        
+        # Perturb wind speed and direction
+        wspd_perturbed, wdir_perturbed = coupled_perturbation(era5_wspd, era5_wdir, seed)
+        
+        # Create additional stronger perturbation for sensitivity analysis
+        wspd_perturbed_strong, wdir_perturbed_strong = coupled_perturbation(era5_wspd, era5_wdir, seed, factor=2.0)
+        
+        # Compute phi values
+        phi_perturbed = compute_phi(wdir_perturbed, azimuth_look)
+        phi_perturbed_strong = compute_phi(wdir_perturbed_strong, azimuth_look)
+        phi_nominal = compute_phi(era5_wdir, azimuth_look)
+        
+        # Forward modeling with CMOD5N
+        sigma_cmod = cmod5n_forward(wspd_perturbed, phi_perturbed, incidence)
+        sigma_cmod_strong = cmod5n_forward(wspd_perturbed_strong, phi_perturbed_strong, incidence)
+        
+        # Spectral processing
+        fft_sar, psd_sar, kx_sar, ky_sar, kmag_sar = compute_2d_fft(sigma_sar)
+        fft_cmod, psd_cmod, kx_cmod, ky_cmod, kmag_cmod = compute_2d_fft(sigma_cmod)
+        fft_cmod_strong, _, _, _, kmag_cmod_strong = compute_2d_fft(sigma_cmod_strong)
+        
+        # Band filtering for SAR
+        band0_sar = band_filter(fft_sar, kmag_sar, 0, 0.1)
+        band1_sar = band_filter(fft_sar, kmag_sar, 0.1, 0.3)
+        band2_sar = band_filter(fft_sar, kmag_sar, 0.3, np.inf)
+        
+        # Band filtering for CMOD
+        band0_cmod = band_filter(fft_cmod, kmag_cmod, 0, 0.1)
+        band1_cmod = band_filter(fft_cmod, kmag_cmod, 0.1, 0.3)
+        band2_cmod = band_filter(fft_cmod, kmag_cmod, 0.3, np.inf)
+        
+        # Band filtering for strong perturbation CMOD
+        band0_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0, 0.1)
+        band1_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0.1, 0.3)
+        band2_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0.3, np.inf)
+        
+        # CMOD inversion for each band
+        wspd_band0 = cmod5n_inverse(band0_sar, phi_nominal, incidence)
+        wspd_band1 = cmod5n_inverse(band1_sar, phi_nominal, incidence)
+        wspd_band2 = cmod5n_inverse(band2_sar, phi_nominal, incidence)
+        
+        # Calculate error metrics for each band
+        errors_band0 = calculate_error_metrics(wspd_band0, era5_wspd)
+        errors_band1 = calculate_error_metrics(wspd_band1, era5_wspd)
+        errors_band2 = calculate_error_metrics(wspd_band2, era5_wspd)
+        
+        # Calculate direct sigma0 comparison metrics
+        sigma0_diff_band0 = calculate_sigma0_comparison_metrics(band0_sar, band0_cmod)
+        sigma0_diff_band1 = calculate_sigma0_comparison_metrics(band1_sar, band1_cmod)
+        sigma0_diff_band2 = calculate_sigma0_comparison_metrics(band2_sar, band2_cmod)
+        
+        # Calculate transfer function ratios
+        ratio_band0 = np.nanmean(band0_cmod / np.where(band0_sar == 0, np.nan, band0_sar))
+        ratio_band1 = np.nanmean(band1_cmod / np.where(band1_sar == 0, np.nan, band1_sar))
+        ratio_band2 = np.nanmean(band2_cmod / np.where(band2_sar == 0, np.nan, band2_sar))
+        
+        # Calculate spectral coherence
+        band_ranges = {
+            'band0': (0, 0.1),
+            'band1': (0.1, 0.3),
+            'band2': (0.3, np.inf)
+        }
+        coherence_metrics = calculate_spectral_coherence(sigma_sar, sigma_cmod, kmag_sar, band_ranges)
+        
+        # Calculate scale-dependent sensitivity
+        sensitivity_metrics = calculate_scale_dependent_sensitivity(
+            band0_cmod, band1_cmod, band2_cmod,
+            band0_cmod_strong, band1_cmod_strong, band2_cmod_strong,
+            wspd_perturbed, wspd_perturbed_strong
+        )
+        
+        # Cross-scale impact analysis
+        # Use band0 from model and bands 1&2 from observations
+        mixed_sigma0_model0_obs12 = band0_cmod + band1_sar + band2_sar
+        wspd_model0_obs12 = cmod5n_inverse(mixed_sigma0_model0_obs12, phi_nominal, incidence)
+        errors_cross_model0_obs12 = calculate_error_metrics(wspd_model0_obs12, era5_wspd)
+        
+        # Use band0 from observations and bands 1&2 from model
+        mixed_sigma0_obs0_model12 = band0_sar + band1_cmod + band2_cmod
+        wspd_obs0_model12 = cmod5n_inverse(mixed_sigma0_obs0_model12, phi_nominal, incidence)
+        errors_cross_obs0_model12 = calculate_error_metrics(wspd_obs0_model12, era5_wspd)
+        
+        # Statistical testing for each file
+        band0_errors = wspd_band0.flatten() - era5_wspd
+        band1_errors = wspd_band1.flatten() - era5_wspd
+        band2_errors = wspd_band2.flatten() - era5_wspd
+        
+        statistic, p_value, is_significant = kruskal_wallis_test(
+            band0_errors[~np.isnan(band0_errors)],
+            band1_errors[~np.isnan(band1_errors)],
+            band2_errors[~np.isnan(band2_errors)]
+        )
+        
+        # Return results
+        return {
+            'sar_filepath': sar_filepath,
+            'era5_wspd': era5_wspd,
+            'era5_wdir': era5_wdir,
+            'wspd_perturbed': wspd_perturbed,
+            'wdir_perturbed': wdir_perturbed,
+            'phi_perturbed': np.median(phi_perturbed),
+            'phi_nominal': np.median(phi_nominal),
+            'sigma_sar_median': np.median(sigma_sar),
+            'sigma_cmod_median': np.median(sigma_cmod),
+            'band0_wspd_mean': np.nanmean(wspd_band0),
+            'band0_wspd_median': np.nanmedian(wspd_band0),
+            'band1_wspd_mean': np.nanmean(wspd_band1),
+            'band1_wspd_median': np.nanmedian(wspd_band1),
+            'band2_wspd_mean': np.nanmean(wspd_band2),
+            'band2_wspd_median': np.nanmedian(wspd_band2),
+            'errors_band0': errors_band0,
+            'errors_band1': errors_band1,
+            'errors_band2': errors_band2,
+            # New scale dependency analysis metrics
+            'sigma0_diff_band0': sigma0_diff_band0,
+            'sigma0_diff_band1': sigma0_diff_band1,
+            'sigma0_diff_band2': sigma0_diff_band2,
+            'ratio_band0': ratio_band0,
+            'ratio_band1': ratio_band1,
+            'ratio_band2': ratio_band2,
+            'coherence_metrics': coherence_metrics,
+            'sensitivity_metrics': sensitivity_metrics,
+            'errors_cross_model0_obs12': errors_cross_model0_obs12,
+            'errors_cross_obs0_model12': errors_cross_obs0_model12,
+            'kw_statistic': statistic,
+            'kw_p_value': p_value,
+            'is_scale_dependent': is_significant
+        }
+        
+    except Exception as e:
+        print(f"Error processing SAR file {sar_filepath}: {e}")
+        return None
+    
+def generate_statistical_report(test_results, output_path):
+    """
+    Generate a report of statistical test results.
+    
+    Parameters:
+    -----------
+    test_results : dict
+        Dictionary with test results from perform_statistical_tests
+    output_path : Path
+        Path to save the report
+    """
+    with open(output_path / "statistical_tests_report.txt", "w") as f:
+        f.write("Statistical Tests for Scale-Dependent Analysis\n")
+        f.write("=" * 60 + "\n\n")
+        
+        # 1. Transfer function ratios
+        f.write("1. Transfer Function Ratios\n")
+        f.write("-" * 40 + "\n")
+        ratio_result = test_results['transfer_ratio']
+        f.write(f"Kruskal-Wallis Test: H={ratio_result['statistic']:.4f}, p={ratio_result['p_value']:.6f}\n")
+        
+        if ratio_result['significant']:
+            f.write("SIGNIFICANT: There are statistically significant differences in the transfer function ratios across bands.\n\n")
+        else:
+            f.write("NOT SIGNIFICANT: No statistically significant differences in the transfer function ratios across bands.\n\n")
+        
+        f.write("Pairwise comparisons (Mann-Whitney U with Bonferroni correction):\n")
+        for pair, result in test_results['transfer_ratio_pairwise'].items():
+            f.write(f"  {pair}: U={result['statistic']:.4f}, p={result['p_value']:.6f}, adj. p={result['p_adjusted']:.6f}, {'SIGNIFICANT' if result['significant'] else 'not significant'}\n")
+        f.write("\n")
+        
+        # 2. Spectral coherence
+        f.write("2. Spectral Coherence\n")
+        f.write("-" * 40 + "\n")
+        coherence_result = test_results['spectral_coherence']
+        f.write(f"Kruskal-Wallis Test: H={coherence_result['statistic']:.4f}, p={coherence_result['p_value']:.6f}\n")
+        
+        if coherence_result['significant']:
+            f.write("SIGNIFICANT: There are statistically significant differences in the spectral coherence across bands.\n\n")
+        else:
+            f.write("NOT SIGNIFICANT: No statistically significant differences in the spectral coherence across bands.\n\n")
+        
+        f.write("Pairwise comparisons (Mann-Whitney U with Bonferroni correction):\n")
+        for pair, result in test_results['spectral_coherence_pairwise'].items():
+            f.write(f"  {pair}: U={result['statistic']:.4f}, p={result['p_value']:.6f}, adj. p={result['p_adjusted']:.6f}, {'SIGNIFICANT' if result['significant'] else 'not significant'}\n")
+        f.write("\n")
+        
+        # 3. Sensitivity metrics
+        f.write("3. Scale-Dependent Sensitivity\n")
+        f.write("-" * 40 + "\n")
+        sensitivity_result = test_results['sensitivity']
+        f.write(f"Kruskal-Wallis Test: H={sensitivity_result['statistic']:.4f}, p={sensitivity_result['p_value']:.6f}\n")
+        
+        if sensitivity_result['significant']:
+            f.write("SIGNIFICANT: There are statistically significant differences in the sensitivity metrics across bands.\n\n")
+        else:
+            f.write("NOT SIGNIFICANT: No statistically significant differences in the sensitivity metrics across bands.\n\n")
+        
+        f.write("Pairwise comparisons (Mann-Whitney U with Bonferroni correction):\n")
+        for pair, result in test_results['sensitivity_pairwise'].items():
+            f.write(f"  {pair}: U={result['statistic']:.4f}, p={result['p_value']:.6f}, adj. p={result['p_adjusted']:.6f}, {'SIGNIFICANT' if result['significant'] else 'not significant'}\n")
+        f.write("\n")
+        
+        # 4. Cross-scale analysis
+        f.write("4. Cross-Scale Analysis\n")
+        f.write("-" * 40 + "\n")
+        cross_scale_result = test_results['cross_scale']
+        f.write(f"Kruskal-Wallis Test: H={cross_scale_result['statistic']:.4f}, p={cross_scale_result['p_value']:.6f}\n")
+        
+        if cross_scale_result['significant']:
+            f.write("SIGNIFICANT: There are statistically significant differences in the bias between regular bands and cross-scale combinations.\n\n")
+        else:
+            f.write("NOT SIGNIFICANT: No statistically significant differences in the bias between regular bands and cross-scale combinations.\n\n")
+        
+        f.write("Pairwise comparisons (Mann-Whitney U with Bonferroni correction):\n")
+        for pair, result in test_results['cross_scale_pairwise'].items():
+            f.write(f"  {pair}: U={result['statistic']:.4f}, p={result['p_value']:.6f}, adj. p={result['p_adjusted']:.6f}, {'SIGNIFICANT' if result['significant'] else 'not significant'}\n")
+        f.write("\n")
+        
+        # Summary of findings
+        f.write("Summary of Statistical Findings\n")
+        f.write("-" * 40 + "\n")
+        significant_findings = []
+        
+        if test_results['transfer_ratio']['significant']:
+            significant_findings.append("Transfer function ratios show scale dependence")
+        
+        if test_results['spectral_coherence']['significant']:
+            significant_findings.append("Spectral coherence shows scale dependence")
+        
+        if test_results['sensitivity']['significant']:
+            significant_findings.append("Sensitivity metrics show scale dependence")
+        
+        if test_results['cross_scale']['significant']:
+            significant_findings.append("Cross-scale analysis shows significant differences between bands")
+        
+        if significant_findings:
+            f.write("The following metrics show statistically significant scale dependence:\n")
+            for finding in significant_findings:
+                f.write(f"- {finding}\n")
+        else:
+            f.write("None of the analyzed metrics showed statistically significant scale dependence.\n")
+
+def plot_error_distributions(df_results, output_dir):
+    """Plot error distributions for different bands."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(exist_ok=True, parents=True)
+    
+    # Extracting error metrics for each band
+    bias0 = df_results['errors_band0'].apply(lambda x: x['bias'])
+    bias1 = df_results['errors_band1'].apply(lambda x: x['bias'])
+    bias2 = df_results['errors_band2'].apply(lambda x: x['bias'])
+    
+    rmse0 = df_results['errors_band0'].apply(lambda x: x['rmse'])
+    rmse1 = df_results['errors_band1'].apply(lambda x: x['rmse'])
+    rmse2 = df_results['errors_band2'].apply(lambda x: x['rmse'])
+    
+    rel0 = df_results['errors_band0'].apply(lambda x: x['rel_error'])
+    rel1 = df_results['errors_band1'].apply(lambda x: x['rel_error'])
+    rel2 = df_results['errors_band2'].apply(lambda x: x['rel_error'])
+    
+    # Plot bias
+    plt.figure(figsize=(10, 6))
+    plt.hist(bias0, bins=30, alpha=0.7, label='Band 0 (k < 0.1)')
+    plt.hist(bias1, bins=30, alpha=0.7, label='Band 1 (0.1 ≤ k < 0.3)')
+    plt.hist(bias2, bins=30, alpha=0.7, label='Band 2 (k ≥ 0.3)')
+    plt.xlabel('Bias (m/s)')
+    plt.ylabel('Frequency')
+    plt.title('Bias Distribution by Wavenumber Band')
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.savefig(output_dir / 'bias_distribution.png', dpi=300)
+    plt.close()
+    
+    # Plot RMSE
+    plt.figure(figsize=(10, 6))
+    plt.hist(rmse0, bins=30, alpha=0.7, label='Band 0 (k < 0.1)')
+    plt.hist(rmse1, bins=30, alpha=0.7, label='Band 1 (0.1 ≤ k < 0.3)')
+    plt.hist(rmse2, bins=30, alpha=0.7, label='Band 2 (k ≥ 0.3)')
+    plt.xlabel('RMSE (m/s)')
+    plt.ylabel('Frequency')
+    plt.title('RMSE Distribution by Wavenumber Band')
+    plt.legend()
+    plt.grid(alpha=0.3)
+    plt.savefig(output_dir / 'rmse_distribution.png', dpi=300)
+    plt.close()
+    
+    # Boxplot for all metrics
+    fig, axes = plt.subplots(3, 1, figsize=(10, 15), sharex=True)
+    
+    # Bias boxplot
+    axes[0].boxplot([bias0, bias1, bias2], labels=['Band 0', 'Band 1', 'Band 2'])
+    axes[0].set_title('Bias by Wavenumber Band')
+    axes[0].set_ylabel('Bias (m/s)')
+    axes[0].grid(alpha=0.3)
+    
+    # RMSE boxplot
+    axes[1].boxplot([rmse0, rmse1, rmse2], labels=['Band 0', 'Band 1', 'Band 2'])
+    axes[1].set_title('RMSE by Wavenumber Band')
+    axes[1].set_ylabel('RMSE (m/s)')
+    axes[1].grid(alpha=0.3)
+    
+    # Relative error boxplot
+    axes[2].boxplot([rel0, rel1, rel2], labels=['Band 0', 'Band 1', 'Band 2'])
+    axes[2].set_title('Relative Error by Wavenumber Band')
+    axes[2].set_xlabel('Wavenumber Band')
+    axes[2].set_ylabel('Relative Error')
+    axes[2].grid(alpha=0.3)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'error_metrics_boxplot.png', dpi=300)
+    plt.close()
+    
+    # Plot new enhanced metrics for scale dependency analysis
+    
+    # Direct sigma0 comparison
+    sigma0_bias0 = df_results['sigma0_diff_band0'].apply(lambda x: x['bias'])
+    sigma0_bias1 = df_results['sigma0_diff_band1'].apply(lambda x: x['bias'])
+    sigma0_bias2 = df_results['sigma0_diff_band2'].apply(lambda x: x['bias'])
+    
+    plt.figure(figsize=(10, 6))
+    plt.boxplot([sigma0_bias0, sigma0_bias1, sigma0_bias2], labels=['Band 0', 'Band 1', 'Band 2'])
+    plt.title('Direct Sigma0 Bias by Wavenumber Band')
+    plt.ylabel('Sigma0 Bias')
+    plt.grid(alpha=0.3)
+    plt.savefig(output_dir / 'sigma0_bias_boxplot.png', dpi=300)
+    plt.close()
+    
+    # Model-to-Observed Ratio
+    ratio0 = df_results['ratio_band0']
+    ratio1 = df_results['ratio_band1']
+    ratio2 = df_results['ratio_band2']
+    
+    plt.figure(figsize=(10, 6))
+    plt.boxplot([ratio0, ratio1, ratio2], labels=['Band 0', 'Band 1', 'Band 2'])
+    plt.title('Model-to-Observed Sigma0 Ratio by Wavenumber Band')
+    plt.ylabel('Ratio')
+    plt.axhline(y=1.0, color='r', linestyle='--', alpha=0.5)  # Reference line at ratio=1
+    plt.grid(alpha=0.3)
+    plt.savefig(output_dir / 'sigma0_ratio_boxplot.png', dpi=300)
+    plt.close()
+    
+    # Spectral Coherence
+    coherence0 = df_results['coherence_metrics'].apply(lambda x: x['band0'])
+    coherence1 = df_results['coherence_metrics'].apply(lambda x: x['band1'])
+    coherence2 = df_results['coherence_metrics'].apply(lambda x: x['band2'])
+    
+    plt.figure(figsize=(10, 6))
+    plt.boxplot([coherence0, coherence1, coherence2], labels=['Band 0', 'Band 1', 'Band 2'])
+    plt.title('Spectral Coherence by Wavenumber Band')
+    plt.ylabel('Coherence')
+    plt.grid(alpha=0.3)
+    plt.savefig(output_dir / 'spectral_coherence_boxplot.png', dpi=300)
+    plt.close()
+    
+    # Scale-Dependent Sensitivity
+    sensitivity0 = df_results['sensitivity_metrics'].apply(lambda x: x['band0'])
+    sensitivity1 = df_results['sensitivity_metrics'].apply(lambda x: x['band1'])
+    sensitivity2 = df_results['sensitivity_metrics'].apply(lambda x: x['band2'])
+    
+    plt.figure(figsize=(10, 6))
+    plt.boxplot([sensitivity0, sensitivity1, sensitivity2], labels=['Band 0', 'Band 1', 'Band 2'])
+    plt.title('Scale-Dependent Sensitivity by Wavenumber Band')
+    plt.ylabel('Sensitivity (∆sigma0/∆wspd)')
+    plt.grid(alpha=0.3)
+    plt.savefig(output_dir / 'scale_sensitivity_boxplot.png', dpi=300)
+    plt.close()
+    
+    # Cross-Scale Impact Analysis
+    cross_bias_model0_obs12 = df_results['errors_cross_model0_obs12'].apply(lambda x: x['bias'])
+    cross_bias_obs0_model12 = df_results['errors_cross_obs0_model12'].apply(lambda x: x['bias'])
+    cross_rmse_model0_obs12 = df_results['errors_cross_model0_obs12'].apply(lambda x: x['rmse'])
+    cross_rmse_obs0_model12 = df_results['errors_cross_obs0_model12'].apply(lambda x: x['rmse'])
+    
+    plt.figure(figsize=(12, 8))
+    labels = ['Regular Band 0', 'Regular Band 1', 'Regular Band 2', 'Model0+Obs12', 'Obs0+Model12']
+    plt.boxplot([bias0, bias1, bias2, cross_bias_model0_obs12, cross_bias_obs0_model12], labels=labels)
+    plt.title('Cross-Scale Impact Analysis: Bias')
+    plt.ylabel('Bias (m/s)')
+    plt.grid(alpha=0.3)
+    plt.savefig(output_dir / 'cross_scale_bias_boxplot.png', dpi=300)
+    plt.close()
+    
+    plt.figure(figsize=(12, 8))
+    plt.boxplot([rmse0, rmse1, rmse2, cross_rmse_model0_obs12, cross_rmse_obs0_model12], labels=labels)
+    plt.title('Cross-Scale Impact Analysis: RMSE')
+    plt.ylabel('RMSE (m/s)')
+    plt.grid(alpha=0.3)
+    plt.savefig(output_dir / 'cross_scale_rmse_boxplot.png', dpi=300)
+    plt.close()
+    
+    # Summary plot of all scale-dependent metrics
+    # Create a summary figure with multiple subplots
+    fig, axs = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # Direct sigma0 comparison
+    axs[0, 0].boxplot([sigma0_bias0, sigma0_bias1, sigma0_bias2], labels=['Band 0', 'Band 1', 'Band 2'])
+    axs[0, 0].set_title('Direct Sigma0 Bias')
+    axs[0, 0].set_ylabel('Bias')
+    axs[0, 0].grid(alpha=0.3)
+    
+    # Model-to-Observed Ratio
+    axs[0, 1].boxplot([ratio0, ratio1, ratio2], labels=['Band 0', 'Band 1', 'Band 2'])
+    axs[0, 1].set_title('Model-to-Observed Ratio')
+    axs[0, 1].set_ylabel('Ratio')
+    axs[0, 1].axhline(y=1.0, color='r', linestyle='--', alpha=0.5)  # Reference line at ratio=1
+    axs[0, 1].grid(alpha=0.3)
+    
+    # Spectral Coherence
+    axs[1, 0].boxplot([coherence0, coherence1, coherence2], labels=['Band 0', 'Band 1', 'Band 2'])
+    axs[1, 0].set_title('Spectral Coherence')
+    axs[1, 0].set_ylabel('Coherence')
+    axs[1, 0].grid(alpha=0.3)
+    
+    # Cross-Scale Analysis
+    axs[1, 1].boxplot([bias0, bias1, bias2, cross_bias_model0_obs12, cross_bias_obs0_model12], labels=labels)
+    axs[1, 1].set_title('Wind Retrieval Bias')
+    axs[1, 1].set_ylabel('Bias (m/s)')
+    axs[1, 1].grid(alpha=0.3)
+    axs[1, 1].tick_params(axis='x', rotation=45)
+    
+    plt.tight_layout()
+    plt.savefig(output_dir / 'scale_dependency_summary.png', dpi=300)
+    plt.close()
+
+
+def plot_statistical_test_results(test_results, output_path):
+    """
+    Generate visualization of statistical test results.
+    
+    Parameters:
+    -----------
+    test_results : dict
+        Dictionary with test results from perform_statistical_tests
+    output_path : Path
+        Path to save the visualization
+    """
+    # Extract p-values for each test
+    tests = ['Transfer Function', 'Spectral Coherence', 'Sensitivity', 'Cross-Scale']
+    p_values = [
+        test_results['transfer_ratio']['p_value'],
+        test_results['spectral_coherence']['p_value'],
+        test_results['sensitivity']['p_value'],
+        test_results['cross_scale']['p_value']
+    ]
+    
+    # Check for NaN values
+    valid_tests = [not np.isnan(p) for p in p_values]
+    
+    if not any(valid_tests):
+        print("Warning: No valid statistical tests to plot")
+        return
+    
+    # Filter out NaN values
+    valid_tests_names = [test for test, valid in zip(tests, valid_tests) if valid]
+    valid_p_values = [p for p, valid in zip(p_values, valid_tests) if valid]
+    significant = [p < 0.05 for p in valid_p_values]
+    
+    # Create bar chart
+    plt.figure(figsize=(12, 8))
+    bars = plt.bar(valid_tests_names, valid_p_values, color=['green' if sig else 'red' for sig in significant])
+    
+    # Add reference line for significance threshold
+    plt.axhline(y=0.05, color='black', linestyle='--', alpha=0.7, label='Significance Threshold (p=0.05)')
+    
+    # Add labels and title
+    plt.ylabel('p-value')
+    plt.title('Statistical Test Results for Scale Dependency')
+    plt.grid(alpha=0.3)
+    plt.yscale('log')  # Use log scale for better visualization
+    plt.legend()
+    
+    # Add p-values on top of bars
+    for bar in bars:
+        height = bar.get_height()
+        plt.text(bar.get_x() + bar.get_width()/2., height + 0.01,
+                 f'p={height:.4f}', ha='center', va='bottom', 
+                 rotation=0 if height > 0.1 else 0)
+    
+    # Add significance indicators
+    for i, sig in enumerate(significant):
+        plt.text(i, 0.001, 'SIGNIFICANT' if sig else 'not significant',
+                ha='center', va='bottom', rotation=90, alpha=0.7)
+    
+    plt.tight_layout()
+    plt.savefig(output_path / 'statistical_test_results.png', dpi=300)
+    plt.close()
+    
+    # Also create a pairwise comparisons visualization
+    # Plot pairwise comparison results for each test that was significant
+    for test_name, test_key, valid in zip(
+        tests, 
+        ['transfer_ratio', 'spectral_coherence', 'sensitivity', 'cross_scale'],
+        valid_tests
+    ):
+        if valid and test_results[test_key]['significant']:
+            pairwise_key = f"{test_key}_pairwise"
+            if pairwise_key in test_results:
+                pairs = list(test_results[pairwise_key].keys())
+                p_adj_values = [test_results[pairwise_key][pair]['p_adjusted'] for pair in pairs]
+                
+                # Check for NaN values in pairwise tests
+                valid_pairs = [not np.isnan(p) for p in p_adj_values]
+                if not any(valid_pairs):
+                    continue
+                
+                valid_pair_names = [pair for pair, valid in zip(pairs, valid_pairs) if valid]
+                valid_p_adj_values = [p for p, valid in zip(p_adj_values, valid_pairs) if valid]
+                significant_pairs = [p < 0.05 for p in valid_p_adj_values]
+                
+                plt.figure(figsize=(10, 6))
+                bars = plt.bar(valid_pair_names, valid_p_adj_values, 
+                              color=['green' if sig else 'red' for sig in significant_pairs])
+                
+                plt.axhline(y=0.05, color='black', linestyle='--', alpha=0.7, 
+                           label='Significance Threshold (p=0.05)')
+                plt.ylabel('Adjusted p-value')
+                plt.title(f'Pairwise Comparisons for {test_name}')
+                plt.grid(alpha=0.3)
+                plt.yscale('log')
+                plt.legend()
+                
+                # Add p-values on top of bars
+                for bar in bars:
+                    height = bar.get_height()
+                    plt.text(bar.get_x() + bar.get_width()/2., height + 0.001,
+                            f'p={height:.4f}', ha='center', va='bottom')
+                
+                plt.tight_layout()
+                plt.savefig(output_path / f'{test_key}_pairwise_tests.png', dpi=300)
+                plt.close()
