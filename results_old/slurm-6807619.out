@@ -1,0 +1,45 @@
+Loading data from parquet files...
+Loaded 36921 WV1 records and 36996 WV2 records.
+Checking SAR data paths...
+After removing NaN paths: 36921 WV1 records and 36996 WV2 records.
+Creating records for parallel processing...
+Processing completed in 3:22:10.871603.
+Successfully processed 36921 WV1 files and 36995 WV2 files.
+Saving results to parquet files...
+Analyzing WV1 data...
+Generating focused analysis plots...
+Performing statistical tests for scale dependency...
+Analyzing WV2 data...
+Generating focused analysis plots...
+Performing statistical tests for scale dependency...
+Performing combined analysis...
+Generating focused analysis plots...
+Performing statistical tests for scale dependency...
+
+Overall Scale Dependency Assessment:
+WV1 Analysis: SCALE DEPENDENT
+  - Statistically significant differences in transfer function ratios
+  - Statistically significant differences in scale-dependent sensitivity
+  - Statistically significant differences in cross-scale analysis
+  - Significant variation in transfer function ratios across scales
+
+WV2 Analysis: SCALE DEPENDENT
+  - Statistically significant differences in transfer function ratios
+  - Statistically significant differences in scale-dependent sensitivity
+  - Statistically significant differences in cross-scale analysis
+  - Significant variation in transfer function ratios across scales
+
+Combined Analysis: SCALE DEPENDENT
+  - Statistically significant differences in transfer function ratios
+  - Statistically significant differences in scale-dependent sensitivity
+  - Statistically significant differences in cross-scale analysis
+  - Significant variation in transfer function ratios across scales
+
+Statistical Results (Combined Dataset):
+Transfer Function Ratios: p-value = 0.000000, SIGNIFICANT
+Scale-Dependent Sensitivity: p-value = 0.000000, SIGNIFICANT
+Cross-Scale Analysis: p-value = 0.000000, SIGNIFICANT
+
+Conclusion: GMF is SCALE-DEPENDENT based on combined Kruskal-Wallis test (p-value: 0.000000)
+
+Analysis complete. Results saved to msc-thesis/results_v2
