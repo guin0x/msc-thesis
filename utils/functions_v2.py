@@ -43,18 +43,15 @@ def coupled_perturbation(wspd, wdir, seed=None, factor=1.0):
     if seed is not None:
         np.random.seed(seed)
     
-    # Compute error magnitudes based on wind speed
     speed_error = factor * (0.1 * wspd + 0.25 * np.maximum(0, wspd - 15))
     dir_error = factor * np.maximum(5, 20 - wspd / 2)
     
-    # Generate random errors with appropriate standard deviations
     wspd_noise = np.random.normal(0, speed_error)
     wdir_noise = np.random.normal(0, dir_error)
     
-    # Apply perturbations
     wspd_perturbed = wspd + wspd_noise
-    wspd_perturbed = np.maximum(0, wspd_perturbed)  # Ensure non-negative wind speed
-    wdir_perturbed = np.mod(wdir + wdir_noise, 360)  # Keep direction in [0, 360)
+    wspd_perturbed = np.maximum(0, wspd_perturbed) 
+    wdir_perturbed = np.mod(wdir + wdir_noise, 360)
     
     return wspd_perturbed, wdir_perturbed
 
@@ -104,11 +101,9 @@ def compute_2d_fft(sigma0):
     if np.isnan(sigma0_clean).any():
         sigma0_clean[np.isnan(sigma0_clean)] = 0
     
-    # Compute 2D FFT
     fft_data = np.fft.fft2(sigma0_clean)
     psd_2d = np.abs(fft_data)**2
     
-    # Compute wavenumbers
     freqx = np.fft.fftfreq(sigma0.shape[1])
     freqy = np.fft.fftfreq(sigma0.shape[0])
     kx, ky = np.meshgrid(freqx, freqy)
@@ -118,14 +113,12 @@ def compute_2d_fft(sigma0):
 
 def band_filter(fft_data, kmagnitude, kmin, kmax):
     """Apply band-pass filter to FFT data."""
-    # Create mask for band-pass filter
+    
     mask = (kmagnitude >= kmin) & (kmagnitude < kmax)
     
-    # Apply filter in frequency domain
     fft_filtered = np.zeros_like(fft_data, dtype=complex)
     fft_filtered[mask] = fft_data[mask]
     
-    # Invert back to spatial domain
     filtered_sigma0 = np.real(np.fft.ifft2(fft_filtered))
     
     return filtered_sigma0
@@ -434,6 +427,7 @@ def perform_statistical_tests(df_results, band_names):
     mix2_bias = df_results['errors_mix2'].apply(lambda x: x['bias'])
     mix3_bias = df_results['errors_mix3'].apply(lambda x: x['bias'])
     mix4_bias = df_results['errors_mix4'].apply(lambda x: x['bias'])
+
     
     # Check if we have at least two different values before running Kruskal-Wallis
     cross_scale_values = np.concatenate([
@@ -542,6 +536,8 @@ def plot_focused_analysis(df_results, output_dir):
     mix2_bias = df_results['errors_mix2'].apply(lambda x: x['bias'])
     mix3_bias = df_results['errors_mix3'].apply(lambda x: x['bias'])
     mix4_bias = df_results['errors_mix4'].apply(lambda x: x['bias'])
+
+    no_mix_bias = df_results['errors_no_mix'].apply(lambda x: x['bias'])    
     
     plt.figure(figsize=(14, 8))
     mix_labels = ['Model(0a,0b)+Obs(0c,1,2)', 'Obs(0a,0b)+Model(0c,1,2)',
@@ -590,7 +586,7 @@ def plot_focused_analysis(df_results, output_dir):
     
     # 4. Different Mix Strategies Comparison
     plt.figure(figsize=(10, 6))
-    mix_data = [mix1_bias, mix2_bias, mix3_bias, mix4_bias]
+    mix_data = [mix1_bias, mix2_bias, mix3_bias, mix4_bias, no_mix_bias]
     plt.boxplot(mix_data, labels=mix_labels)
     plt.title('Comparison of Different Mix Strategies')
     plt.ylabel('Bias (m/s)')
@@ -800,6 +796,11 @@ def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
         mix4_sigma0 = band0a_sar + band0b_sar + band0c_sar + band1_cmod + band2_cmod
         wspd_mix4 = cmod5n_inverse(mix4_sigma0, phi_nominal, incidence)
         errors_mix4 = calculate_error_metrics(wspd_mix4, era5_wspd)
+
+        # Original: User only observed in all bands
+        mix_sigma0 = band0a_sar + band0b_sar + band0c_sar + band1_sar + band2_sar
+        wspd_no_mix = cmod5n_inverse(mix_sigma0, phi_nominal, incidence)
+        errors_no_mix = calculate_error_metrics(wspd_no_mix, era5_wspd)
         
         # Statistical testing for each file
         band0a_errors = wspd_band0a.flatten() - era5_wspd
@@ -850,6 +851,8 @@ def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'errors_mix2': errors_mix2,
             'errors_mix3': errors_mix3,
             'errors_mix4': errors_mix4,
+            # Original
+            'errors_no_mix': errors_no_mix,
             # Statistical test
             'kw_statistic': statistic,
             'kw_p_value': p_value,
@@ -859,3 +862,4 @@ def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
     except Exception as e:
         print(f"Error processing SAR file {sar_filepath}: {e}")
         return None
+    
