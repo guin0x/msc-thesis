@@ -64,39 +64,17 @@ def compute_phi(wdir, azimuth_look):
 
 def cmod5n_forward(wspd, phi, incidence):
     """CMOD5N forward model to compute sigma0 from wind parameters."""
-    try:
-        from utils.cmod5n import cmod5n_forward
-        return cmod5n_forward(np.full(phi.shape, wspd), phi, incidence)
-    except ImportError:
-        try:
-            from utils.cmod5n import cmod5n_forward
-            return cmod5n_forward(np.full(phi.shape, wspd), phi, incidence)
-        except ImportError:
-            print("Warning: No CMOD5N module found.")
-            # Simplified approximation
-            phi_rad = np.deg2rad(phi)
-            inc_rad = np.deg2rad(incidence)
-            return 0.1 * (1 + np.cos(phi_rad)) * wspd**0.5 * np.exp(-0.1 * inc_rad)
+    from utils.cmod5n import cmod5n_forward
+    return cmod5n_forward(np.full(phi.shape, wspd), phi, incidence)
 
 def cmod5n_inverse(sigma0, phi, incidence):
     """CMOD5N inverse model to compute wind speed from sigma0."""
-    try:
-        from utils.cmod5n import cmod5n_inverse
-        return cmod5n_inverse(sigma0, phi, incidence)
-    except ImportError:
-        try:
-            from utils.cmod5n import cmod5n_inverse
-            return cmod5n_inverse(sigma0, phi, incidence,)
-        except ImportError:
-            print("Warning: No CMOD5N module found.")
-            # Simplified approximation
-            phi_rad = np.deg2rad(phi)
-            inc_rad = np.deg2rad(incidence)
-            return np.sqrt(sigma0 / (0.1 * (1 + np.cos(phi_rad)) * np.exp(-0.1 * inc_rad)))
+    from utils.cmod5n import cmod5n_inverse
+    return cmod5n_inverse(sigma0, phi, incidence)
 
 def compute_2d_fft(sigma0):
     """Compute 2D FFT of sigma0 values."""
-    # Clean NaN values
+
     sigma0_clean = sigma0.copy()
     if np.isnan(sigma0_clean).any():
         sigma0_clean[np.isnan(sigma0_clean)] = 0
@@ -139,12 +117,10 @@ def calculate_error_metrics(retrieved_wspd, true_wspd):
             true_wspd = true_wspd.flatten()
         true_wspd_clean = true_wspd[mask]
     
-    # Calculate errors
     error = retrieved_wspd_clean - true_wspd_clean
     abs_error = np.abs(error)
     rel_error = error / true_wspd_clean
     
-    # Calculate metrics
     bias = np.mean(error)
     rmse = np.sqrt(np.mean(error**2))
     mean_abs_error = np.mean(abs_error)
@@ -863,3 +839,76 @@ def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
         print(f"Error processing SAR file {sar_filepath}: {e}")
         return None
     
+def radial_profile(data, center=None):
+    y, x = np.indices(data.shape)
+    if center is None:
+        center = np.array([(x.max() - x.min()) / 2.0, (y.max() - y.min()) / 2.0])
+    
+    r = np.sqrt((x - center[0])**2 + (y - center[1])**2)
+    r = r.astype(int)
+    
+    tbin = np.bincount(r.ravel(), weights=data.ravel())
+    nr = np.bincount(r.ravel())
+    
+    radial_profile = tbin / nr
+    
+    return np.arange(len(radial_profile)), radial_profile
+
+def process_sar_file_v2(sar_filepath, era5_wspd, era5_wdir, seed=None):
+    """Process a single SAR file to calculate radial PSD."""
+    try:
+        sar_ds = read_sar_data(sar_filepath)
+        if sar_ds is None:
+            return None
+        
+        sigma_sar = sar_ds.sigma0.values
+        incidence = sar_ds.incidence.values
+        ground_heading = sar_ds.ground_heading.values
+
+        if sigma_sar.ndim == 3:
+            sigma_sar = sigma_sar[0] 
+        
+        if np.isnan(sigma_sar[-1, :]).all():
+            sigma_sar = sigma_sar[:-1, :]
+            incidence = incidence[:-1, :]
+            ground_heading = ground_heading[:-1, :]
+
+        if np.isnan(sigma_sar[:, -1]).all():
+            sigma_sar = sigma_sar[:, :-1]
+            incidence = incidence[:, :-1]
+            ground_heading = ground_heading[:, :-1]
+
+        _, psd, _, _, _, sigma0_clean = compute_2d_fft(sigma_sar)
+
+        psd_centered = np.fft.fftshift(psd)
+        
+        # Calculate radial profile
+        def radial_profile(data, center=None):
+            y, x = np.indices(data.shape)
+            if center is None:
+                center = np.array([(x.max() - x.min()) / 2.0, (y.max() - y.min()) / 2.0])
+            
+            r = np.sqrt((x - center[0])**2 + (y - center[1])**2)
+            r = r.astype(np.int)
+            
+            tbin = np.bincount(r.ravel(), weights=data.ravel())
+            nr = np.bincount(r.ravel())
+            nr[nr == 0] = 1  # Avoid division by zero
+            
+            return np.arange(len(tbin)), tbin / nr
+        
+        distances, radial_psd = radial_profile(psd_centered)
+        min_length = min(len(distances), len(radial_psd))
+        distances = distances[:min_length]
+        radial_psd = radial_psd[:min_length]
+
+        pixel_size = 5  # Using 5m for Wave mode based on research
+        k_values = distances * (1.0 / (pixel_size * max(psd.shape)))
+
+        return {
+
+            'radial_psd': radial_psd,
+        }
+    except Exception as e:
+        print(f"Error processing {sar_filepath} for radial PSD: {e}")
+        return None

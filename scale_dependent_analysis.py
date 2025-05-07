@@ -31,6 +31,7 @@ import tqdm
 # Import custom functions
 from utils.functions import (
     process_sar_file,
+    process_sar_file_v2,
     plot_focused_analysis,
     kruskal_wallis_test,
     perform_statistical_tests,
@@ -40,7 +41,7 @@ from utils.functions import (
 # Helper function for parallel processing
 def process_record(record):
     """Wrapper function for parallel processing"""
-    return process_sar_file(
+    return process_sar_file_v2(
         record['sar_filepath'],
         record['era5_wspd'],
         record['era5_wdir'],
@@ -115,22 +116,18 @@ def analyze_scale_dependency(df_results, output_path, band_names=None):
         scale_dependency_evidence.append("Significant variation in sensitivity across scales")
     
     return has_scale_dependency, scale_dependency_evidence, test_results
-
 def main():
     """Main function to execute the workflow."""
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Analyze scale-dependent wind stress variability.')
     parser.add_argument('--processed_data', type=str, 
                         default='/home/gfeirreiraseco/msc-thesis/processed_data',
-                        # default='processed_data',
                         help='Path to processed data directory.')
     parser.add_argument('--sardata2020', type=str, 
                         default='projects/fluxsar/data/Sentinel1/WV/2020',
-                        # default = "processed_data/SAR/2020",
                         help='Path to SAR data for 2020.')
     parser.add_argument('--sardata2021', type=str, 
                         default='projects/fluxsar/data/Sentinel1/WV/2021',
-                        # default = "processed_data/SAR/2021",
                         help='Path to SAR data for 2021.')
     parser.add_argument('--output', type=str, default='msc-thesis/results_v2',
                         help='Path to output directory.')
@@ -173,7 +170,6 @@ def main():
     for _, row in df_wv1.iterrows():
         records_wv1.append({
             'sar_filepath': row['path_to_sar_file'],
-            # 'sar_filepath': row['path_to_sar_file'].replace("/projects/fluxsar/data/", "processed_data/"),
             'era5_wspd': row['wspd'],
             'era5_wdir': row['wdir_deg_from_north'],  
             'seed': args.seed
@@ -183,51 +179,184 @@ def main():
     for _, row in df_wv2.iterrows():
         records_wv2.append({
             'sar_filepath': row['path_to_sar_file'],
-            # 'sar_filepath': row['path_to_sar_file'].replace("/projects/fluxsar/data/", "processed_data/"),
             'era5_wspd': row['wspd'],
             'era5_wdir': row['wdir_deg_from_north'],  
             'seed': args.seed
         })
     
-    # Process SAR files in parallel
-    print(f"Processing {len(records_wv1)} WV1 files in parallel using {args.num_processes} processes...")
-    start_time = datetime.now()
+    # Check if result files already exist
+    wv1_result_path = Path('msc-thesis/results/wv1_results.parquet')
+    wv2_result_path = Path('msc-thesis/results/wv2_results.parquet')
     
-    # Process WV1 files
-    with Pool(processes=args.num_processes) as pool:
-        results_wv1 = list(tqdm.tqdm(
-            pool.imap_unordered(process_record, records_wv1),
-            total=len(records_wv1),
-        ))
+    if wv1_result_path.exists() and wv2_result_path.exists():
+        print("Found existing result files. Loading and appending radial_psd...")
+        
+        # Load existing results
+        df_results_wv1 = pd.read_parquet(wv1_result_path)
+        df_results_wv2 = pd.read_parquet(wv2_result_path)
+        
+        # Function to process radial PSD only
+        def process_radial_psd(record):
+            """Process only the radial PSD for a SAR file"""
+            try:
+                result = process_sar_file_v2(
+                    record['sar_filepath'],
+                    record['era5_wspd'],
+                    record['era5_wdir'],
+                    record.get('seed')
+                )
+                if result is not None:
+                    return {
+                        'sar_filepath': record['sar_filepath'],
+                        'radial_psd': result['radial_psd']
+                    }
+                return None
+            except Exception as e:
+                print(f"Error processing {record['sar_filepath']}: {e}")
+                return None
+        
+        # Process WV1 files for radial PSD
+        print(f"Processing {len(records_wv1)} WV1 files for radial PSD using {args.num_processes} processes...")
+        with Pool(processes=args.num_processes) as pool:
+            radial_results_wv1 = list(tqdm.tqdm(
+                pool.imap_unordered(process_radial_psd, records_wv1),
+                total=len(records_wv1),
+            ))
+        
+        # Filter out None results and create DataFrame
+        radial_results_wv1 = [result for result in radial_results_wv1 if result is not None]
+        df_radial_wv1 = pd.DataFrame(radial_results_wv1)
+        
+        # Process WV2 files for radial PSD
+        print(f"Processing {len(records_wv2)} WV2 files for radial PSD...")
+        with Pool(processes=args.num_processes) as pool:
+            radial_results_wv2 = list(tqdm.tqdm(
+                pool.imap_unordered(process_radial_psd, records_wv2),
+                total=len(records_wv2),
+            ))
+        
+        # Filter out None results and create DataFrame
+        radial_results_wv2 = [result for result in radial_results_wv2 if result is not None]
+        df_radial_wv2 = pd.DataFrame(radial_results_wv2)
+        
+        # Merge radial PSD results with existing results
+        df_results_wv1 = pd.merge(
+            df_results_wv1, 
+            df_radial_wv1, 
+            on='sar_filepath', 
+            how='left'
+        )
+        
+        df_results_wv2 = pd.merge(
+            df_results_wv2, 
+            df_radial_wv2, 
+            on='sar_filepath', 
+            how='left'
+        )
+        
+        # Save updated results
+        print("Saving updated results with radial_psd...")
+        df_results_wv1.to_parquet(output_path / "wv1_results_updated.parquet")
+        df_results_wv2.to_parquet(output_path / "wv2_results_updated.parquet")
+        
+    else:
+        # Process SAR files in parallel
+        print(f"No existing result files found. Processing {len(records_wv1)} WV1 files in parallel using {args.num_processes} processes...")
+        start_time = datetime.now()
+        
+        # Process WV1 files with full processing
+        with Pool(processes=args.num_processes) as pool:
+            results_wv1 = list(tqdm.tqdm(
+                pool.imap_unordered(process_record, records_wv1),
+                total=len(records_wv1),
+            ))
+        
+        # Filter out None results
+        results_wv1 = [result for result in results_wv1 if result is not None]
+        
+        print(f"Processing {len(records_wv2)} WV2 files in parallel...")
+        
+        # Process WV2 files with full processing
+        with Pool(processes=args.num_processes) as pool:
+            results_wv2 = list(tqdm.tqdm(
+                pool.imap_unordered(process_record, records_wv2),
+                total=len(records_wv2),
+            ))
+        
+        # Filter out None results
+        results_wv2 = [result for result in results_wv2 if result is not None]
+        
+        end_time = datetime.now()
+        print(f"Processing completed in {end_time - start_time}.")
+        print(f"Successfully processed {len(results_wv1)} WV1 files and {len(results_wv2)} WV2 files.")
+        
+        # Convert results to DataFrames
+        df_results_wv1 = pd.DataFrame(results_wv1)
+        df_results_wv2 = pd.DataFrame(results_wv2)
+        
+        # Now process for radial PSD
+        print("Processing for radial PSD...")
+        
+        # Function to extract only radial PSD
+        def add_radial_psd(record):
+            try:
+                result = process_sar_file_v2(
+                    record['sar_filepath'],
+                    record['era5_wspd'],
+                    record['era5_wdir'],
+                    record.get('seed')
+                )
+                if result is not None:
+                    return {
+                        'sar_filepath': record['sar_filepath'],
+                        'radial_psd': result['radial_psd']
+                    }
+                return None
+            except Exception as e:
+                print(f"Error processing {record['sar_filepath']} for radial PSD: {e}")
+                return None
+        
+        # Process for radial PSD
+        with Pool(processes=args.num_processes) as pool:
+            radial_results_wv1 = list(tqdm.tqdm(
+                pool.imap_unordered(add_radial_psd, records_wv1),
+                total=len(records_wv1),
+            ))
+        
+        with Pool(processes=args.num_processes) as pool:
+            radial_results_wv2 = list(tqdm.tqdm(
+                pool.imap_unordered(add_radial_psd, records_wv2),
+                total=len(records_wv2),
+            ))
+        
+        # Filter and convert to DataFrame
+        radial_results_wv1 = [result for result in radial_results_wv1 if result is not None]
+        radial_results_wv2 = [result for result in radial_results_wv2 if result is not None]
+        
+        df_radial_wv1 = pd.DataFrame(radial_results_wv1)
+        df_radial_wv2 = pd.DataFrame(radial_results_wv2)
+        
+        # Merge with main results
+        df_results_wv1 = pd.merge(
+            df_results_wv1, 
+            df_radial_wv1, 
+            on='sar_filepath', 
+            how='left'
+        )
+        
+        df_results_wv2 = pd.merge(
+            df_results_wv2, 
+            df_radial_wv2, 
+            on='sar_filepath', 
+            how='left'
+        )
+        
+        # Save results to parquet files
+        print("Saving results to parquet files...")
+        df_results_wv1.to_parquet(output_path / "wv1_results.parquet")
+        df_results_wv2.to_parquet(output_path / "wv2_results.parquet")
     
-    # Filter out None results
-    results_wv1 = [result for result in results_wv1 if result is not None]
-    
-    print(f"Processing {len(records_wv2)} WV2 files in parallel...")
-    
-    # Process WV2 files
-    with Pool(processes=args.num_processes) as pool:
-        results_wv2 = list(tqdm.tqdm(
-            pool.imap_unordered(process_record, records_wv2),
-            total=len(records_wv2),
-        ))
-    
-    # Filter out None results
-    results_wv2 = [result for result in results_wv2 if result is not None]
-    
-    end_time = datetime.now()
-    print(f"Processing completed in {end_time - start_time}.")
-    print(f"Successfully processed {len(results_wv1)} WV1 files and {len(results_wv2)} WV2 files.")
-    
-    # Convert results to DataFrames
-    df_results_wv1 = pd.DataFrame(results_wv1)
-    df_results_wv2 = pd.DataFrame(results_wv2)
-    
-    # Save results to parquet files
-    print("Saving results to parquet files...")
-    df_results_wv1.to_parquet(output_path / "wv1_results.parquet")
-    df_results_wv2.to_parquet(output_path / "wv2_results.parquet")
-    
+    # The rest of your analysis code continues as before...
     # Define band names
     band_names = ['band0a', 'band0b', 'band0c', 'band1', 'band2']
     
