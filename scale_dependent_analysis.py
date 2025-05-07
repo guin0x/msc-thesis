@@ -62,7 +62,8 @@ def process_radial_psd(record):
             print(f"Successfully processed {record['sar_filepath']}")
             return {
                 'sar_filepath': record['sar_filepath'],
-                'radial_psd': result['radial_psd']
+                'radial_psd': result['radial_psd'],
+                'k_values': result['k_values']
             }
         print(f"Failed to process {record['sar_filepath']} - returned None")
         return None
@@ -82,7 +83,8 @@ def add_radial_psd(record):
         if result is not None:
             return {
                 'sar_filepath': record['sar_filepath'],
-                'radial_psd': result['radial_psd']
+                'radial_psd': result['radial_psd'],
+                'k_values': result['k_values'],
             }
         return None
     except Exception as e:
