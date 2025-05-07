@@ -908,6 +908,7 @@ def process_sar_file_v2(sar_filepath, era5_wspd, era5_wdir, seed=None):
         return {
             'sar_filepath': sar_filepath,
             'radial_psd': radial_psd,
+            'k_values': k_values,
         }
     except Exception as e:
         print(f"Error processing {sar_filepath} for radial PSD: {e}")
