@@ -41,12 +41,53 @@ from utils.functions import (
 # Helper function for parallel processing
 def process_record(record):
     """Wrapper function for parallel processing"""
-    return process_sar_file_v2(
+    return process_sar_file(
         record['sar_filepath'],
         record['era5_wspd'],
         record['era5_wdir'],
         record.get('seed')
     )
+
+def process_radial_psd(record):
+    """Process only the radial PSD for a SAR file"""
+    try:
+        print(f"Processing {record['sar_filepath']}...")
+        result = process_sar_file_v2(
+            record['sar_filepath'],
+            record['era5_wspd'],
+            record['era5_wdir'],
+            record.get('seed')
+        )
+        if result is not None:
+            print(f"Successfully processed {record['sar_filepath']}")
+            return {
+                'sar_filepath': record['sar_filepath'],
+                'radial_psd': result['radial_psd']
+            }
+        print(f"Failed to process {record['sar_filepath']} - returned None")
+        return None
+    except Exception as e:
+        print(f"Error processing {record['sar_filepath']}: {e}")
+        return None
+    
+        
+def add_radial_psd(record):
+    try:
+        result = process_sar_file_v2(
+            record['sar_filepath'],
+            record['era5_wspd'],
+            record['era5_wdir'],
+            record.get('seed')
+        )
+        if result is not None:
+            return {
+                'sar_filepath': record['sar_filepath'],
+                'radial_psd': result['radial_psd']
+            }
+        return None
+    except Exception as e:
+        print(f"Error processing {record['sar_filepath']} for radial PSD: {e}")
+        return None
 
 def analyze_scale_dependency(df_results, output_path, band_names=None):
     """
@@ -116,20 +157,24 @@ def analyze_scale_dependency(df_results, output_path, band_names=None):
         scale_dependency_evidence.append("Significant variation in sensitivity across scales")
     
     return has_scale_dependency, scale_dependency_evidence, test_results
+
 def main():
     """Main function to execute the workflow."""
     # Parse command-line arguments
     parser = argparse.ArgumentParser(description='Analyze scale-dependent wind stress variability.')
     parser.add_argument('--processed_data', type=str, 
                         default='/home/gfeirreiraseco/msc-thesis/processed_data',
+                        # default="processed_data",
                         help='Path to processed data directory.')
     parser.add_argument('--sardata2020', type=str, 
                         default='projects/fluxsar/data/Sentinel1/WV/2020',
+                        # default = "processed_data/Sentinel1/WV/2020",
                         help='Path to SAR data for 2020.')
     parser.add_argument('--sardata2021', type=str, 
                         default='projects/fluxsar/data/Sentinel1/WV/2021',
+                        # default = "processed_data/Sentinel1/WV/2021",
                         help='Path to SAR data for 2021.')
-    parser.add_argument('--output', type=str, default='msc-thesis/results_v2',
+    parser.add_argument('--output', type=str, default='msc-thesis/results',
                         help='Path to output directory.')
     parser.add_argument('--num_processes', type=int, default=48,
                         help='Number of processes to use for parallel processing.')
@@ -167,9 +212,11 @@ def main():
     # Create records for parallel processing
     print("Creating records for parallel processing...")
     records_wv1 = []
+
     for _, row in df_wv1.iterrows():
         records_wv1.append({
             'sar_filepath': row['path_to_sar_file'],
+            # 'sar_filepath': f'processed_data/Sentinel1/WV/{row["renamed_filename"][17:21]}/{row["renamed_filename"]}',
             'era5_wspd': row['wspd'],
             'era5_wdir': row['wdir_deg_from_north'],  
             'seed': args.seed
@@ -179,6 +226,7 @@ def main():
     for _, row in df_wv2.iterrows():
         records_wv2.append({
             'sar_filepath': row['path_to_sar_file'],
+            # 'sar_filepath': f'processed_data/Sentinel1/WV/{row["renamed_filename"][17:21]}/{row["renamed_filename"]}',
             'era5_wspd': row['wspd'],
             'era5_wdir': row['wdir_deg_from_north'],  
             'seed': args.seed
@@ -193,27 +241,7 @@ def main():
         
         # Load existing results
         df_results_wv1 = pd.read_parquet(wv1_result_path)
-        df_results_wv2 = pd.read_parquet(wv2_result_path)
-        
-        # Function to process radial PSD only
-        def process_radial_psd(record):
-            """Process only the radial PSD for a SAR file"""
-            try:
-                result = process_sar_file_v2(
-                    record['sar_filepath'],
-                    record['era5_wspd'],
-                    record['era5_wdir'],
-                    record.get('seed')
-                )
-                if result is not None:
-                    return {
-                        'sar_filepath': record['sar_filepath'],
-                        'radial_psd': result['radial_psd']
-                    }
-                return None
-            except Exception as e:
-                print(f"Error processing {record['sar_filepath']}: {e}")
-                return None
+        df_results_wv2 = pd.read_parquet(wv2_result_path)       
         
         # Process WV1 files for radial PSD
         print(f"Processing {len(records_wv1)} WV1 files for radial PSD using {args.num_processes} processes...")
@@ -238,7 +266,15 @@ def main():
         # Filter out None results and create DataFrame
         radial_results_wv2 = [result for result in radial_results_wv2 if result is not None]
         df_radial_wv2 = pd.DataFrame(radial_results_wv2)
+
+        # Add this right after creating the DataFrames
+        print(f"Length of radial_results_wv1: {len(radial_results_wv1)}")
+        print(f"First few results: {radial_results_wv1[:2] if radial_results_wv1 else 'None'}")
+        print(f"Length of df_radial_wv1: {len(df_radial_wv1)}")
         
+        print("df_results_wv1 columns:", df_results_wv1.columns.tolist())
+        print("df_radial_wv1 columns:", df_radial_wv1.columns.tolist())
+
         # Merge radial PSD results with existing results
         df_results_wv1 = pd.merge(
             df_results_wv1, 
@@ -297,26 +333,6 @@ def main():
         # Now process for radial PSD
         print("Processing for radial PSD...")
         
-        # Function to extract only radial PSD
-        def add_radial_psd(record):
-            try:
-                result = process_sar_file_v2(
-                    record['sar_filepath'],
-                    record['era5_wspd'],
-                    record['era5_wdir'],
-                    record.get('seed')
-                )
-                if result is not None:
-                    return {
-                        'sar_filepath': record['sar_filepath'],
-                        'radial_psd': result['radial_psd']
-                    }
-                return None
-            except Exception as e:
-                print(f"Error processing {record['sar_filepath']} for radial PSD: {e}")
-                return None
-        
-        # Process for radial PSD
         with Pool(processes=args.num_processes) as pool:
             radial_results_wv1 = list(tqdm.tqdm(
                 pool.imap_unordered(add_radial_psd, records_wv1),
@@ -335,7 +351,15 @@ def main():
         
         df_radial_wv1 = pd.DataFrame(radial_results_wv1)
         df_radial_wv2 = pd.DataFrame(radial_results_wv2)
-        
+
+        # Add this right after creating the DataFrames
+        print(f"Length of radial_results_wv1: {len(radial_results_wv1)}")
+        print(f"First few results: {radial_results_wv1[:2] if radial_results_wv1 else 'None'}")
+        print(f"Length of df_radial_wv1: {len(df_radial_wv1)}")
+
+        print("df_results_wv1 columns:", df_results_wv1.columns.tolist())
+        print("df_radial_wv1 columns:", df_radial_wv1.columns.tolist())
+
         # Merge with main results
         df_results_wv1 = pd.merge(
             df_results_wv1, 
@@ -355,62 +379,62 @@ def main():
         print("Saving results to parquet files...")
         df_results_wv1.to_parquet(output_path / "wv1_results.parquet")
         df_results_wv2.to_parquet(output_path / "wv2_results.parquet")
-    
-    # The rest of your analysis code continues as before...
-    # Define band names
-    band_names = ['band0a', 'band0b', 'band0c', 'band1', 'band2']
-    
-    # Analyze WV1 data
-    print("Analyzing WV1 data...")
-    has_scale_dependency_wv1, evidence_wv1, test_results_wv1 = analyze_scale_dependency(
-        df_results_wv1, output_path / "wv1_analysis", band_names
-    )
-    
-    # Analyze WV2 data
-    print("Analyzing WV2 data...")
-    has_scale_dependency_wv2, evidence_wv2, test_results_wv2 = analyze_scale_dependency(
-        df_results_wv2, output_path / "wv2_analysis", band_names
-    )
-    
-    # Combined analysis
-    print("Performing combined analysis...")
-    df_results_combined = pd.concat([df_results_wv1, df_results_wv2], ignore_index=True)
-    
-    has_scale_dependency_combined, evidence_combined, test_results_combined = analyze_scale_dependency(
-        df_results_combined, output_path / "combined_analysis", band_names
-    )
-    
-    # Combined KW test for all bands
-    all_bias0a = df_results_wv1['errors_band0a'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band0a'].apply(lambda x: x['bias']).tolist()
-    all_bias0b = df_results_wv1['errors_band0b'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band0b'].apply(lambda x: x['bias']).tolist()
-    all_bias0c = df_results_wv1['errors_band0c'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band0c'].apply(lambda x: x['bias']).tolist()
-    all_bias1 = df_results_wv1['errors_band1'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band1'].apply(lambda x: x['bias']).tolist()
-    all_bias2 = df_results_wv1['errors_band2'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band2'].apply(lambda x: x['bias']).tolist()
 
-    statistic, p_value, is_significant = kruskal_wallis_test(all_bias0a, all_bias0b, all_bias0c, all_bias1, all_bias2)
-    
-    # Print summary findings to console
-    print("\nOverall Scale Dependency Assessment:")
-    print(f"WV1 Analysis: {'SCALE DEPENDENT' if has_scale_dependency_wv1 else 'Not scale dependent'}")
-    for evidence in evidence_wv1:
-        print(f"  - {evidence}")
+    # # The rest of your analysis code continues as before...
+    # # Define band names
+    # band_names = ['band0a', 'band0b', 'band0c', 'band1', 'band2']
+
+    # # Analyze WV1 data
+    # print("Analyzing WV1 data...")
+    # has_scale_dependency_wv1, evidence_wv1, test_results_wv1 = analyze_scale_dependency(
+    #     df_results_wv1, output_path / "wv1_analysis", band_names
+    # )
+
+    # # Analyze WV2 data
+    # print("Analyzing WV2 data...")
+    # has_scale_dependency_wv2, evidence_wv2, test_results_wv2 = analyze_scale_dependency(
+    #     df_results_wv2, output_path / "wv2_analysis", band_names
+    # )
+
+    # # Combined analysis
+    # print("Performing combined analysis...")
+    # df_results_combined = pd.concat([df_results_wv1, df_results_wv2], ignore_index=True)
+
+    # has_scale_dependency_combined, evidence_combined, test_results_combined = analyze_scale_dependency(
+    #     df_results_combined, output_path / "combined_analysis", band_names
+    # )
+
+    # # Combined KW test for all bands
+    # all_bias0a = df_results_wv1['errors_band0a'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band0a'].apply(lambda x: x['bias']).tolist()
+    # all_bias0b = df_results_wv1['errors_band0b'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band0b'].apply(lambda x: x['bias']).tolist()
+    # all_bias0c = df_results_wv1['errors_band0c'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band0c'].apply(lambda x: x['bias']).tolist()
+    # all_bias1 = df_results_wv1['errors_band1'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band1'].apply(lambda x: x['bias']).tolist()
+    # all_bias2 = df_results_wv1['errors_band2'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band2'].apply(lambda x: x['bias']).tolist()
+
+    # statistic, p_value, is_significant = kruskal_wallis_test(all_bias0a, all_bias0b, all_bias0c, all_bias1, all_bias2)
+
+    # # Print summary findings to console
+    # print("\nOverall Scale Dependency Assessment:")
+    # print(f"WV1 Analysis: {'SCALE DEPENDENT' if has_scale_dependency_wv1 else 'Not scale dependent'}")
+    # for evidence in evidence_wv1:
+    #     print(f"  - {evidence}")
         
-    print(f"\nWV2 Analysis: {'SCALE DEPENDENT' if has_scale_dependency_wv2 else 'Not scale dependent'}")
-    for evidence in evidence_wv2:
-        print(f"  - {evidence}")
+    # print(f"\nWV2 Analysis: {'SCALE DEPENDENT' if has_scale_dependency_wv2 else 'Not scale dependent'}")
+    # for evidence in evidence_wv2:
+    #     print(f"  - {evidence}")
         
-    print(f"\nCombined Analysis: {'SCALE DEPENDENT' if has_scale_dependency_combined else 'Not scale dependent'}")
-    for evidence in evidence_combined:
-        print(f"  - {evidence}")
-    
-    print(f"\nStatistical Results (Combined Dataset):")
-    print(f"Transfer Function Ratios: p-value = {test_results_combined['transfer_ratio']['p_value']:.6f}, {'SIGNIFICANT' if test_results_combined['transfer_ratio']['significant'] else 'not significant'}")
-    print(f"Scale-Dependent Sensitivity: p-value = {test_results_combined['sensitivity']['p_value']:.6f}, {'SIGNIFICANT' if test_results_combined['sensitivity']['significant'] else 'not significant'}")
-    print(f"Cross-Scale Analysis: p-value = {test_results_combined['cross_scale']['p_value']:.6f}, {'SIGNIFICANT' if test_results_combined['cross_scale']['significant'] else 'not significant'}")
-    
-    print(f"\nConclusion: GMF is {'SCALE-DEPENDENT' if is_significant else 'NOT scale-dependent'} based on combined Kruskal-Wallis test (p-value: {p_value:.6f})")
-    
-    print(f"\nAnalysis complete. Results saved to {output_path}")
+    # print(f"\nCombined Analysis: {'SCALE DEPENDENT' if has_scale_dependency_combined else 'Not scale dependent'}")
+    # for evidence in evidence_combined:
+    #     print(f"  - {evidence}")
+
+    # print(f"\nStatistical Results (Combined Dataset):")
+    # print(f"Transfer Function Ratios: p-value = {test_results_combined['transfer_ratio']['p_value']:.6f}, {'SIGNIFICANT' if test_results_combined['transfer_ratio']['significant'] else 'not significant'}")
+    # print(f"Scale-Dependent Sensitivity: p-value = {test_results_combined['sensitivity']['p_value']:.6f}, {'SIGNIFICANT' if test_results_combined['sensitivity']['significant'] else 'not significant'}")
+    # print(f"Cross-Scale Analysis: p-value = {test_results_combined['cross_scale']['p_value']:.6f}, {'SIGNIFICANT' if test_results_combined['cross_scale']['significant'] else 'not significant'}")
+
+    # print(f"\nConclusion: GMF is {'SCALE-DEPENDENT' if is_significant else 'NOT scale-dependent'} based on combined Kruskal-Wallis test (p-value: {p_value:.6f})")
+
+    # print(f"\nAnalysis complete. Results saved to {output_path}")
 
 if __name__ == '__main__':
     main()

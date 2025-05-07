@@ -878,7 +878,7 @@ def process_sar_file_v2(sar_filepath, era5_wspd, era5_wdir, seed=None):
             incidence = incidence[:, :-1]
             ground_heading = ground_heading[:, :-1]
 
-        _, psd, _, _, _, sigma0_clean = compute_2d_fft(sigma_sar)
+        _, psd, _, _, _ = compute_2d_fft(sigma_sar)
 
         psd_centered = np.fft.fftshift(psd)
         
@@ -889,11 +889,11 @@ def process_sar_file_v2(sar_filepath, era5_wspd, era5_wdir, seed=None):
                 center = np.array([(x.max() - x.min()) / 2.0, (y.max() - y.min()) / 2.0])
             
             r = np.sqrt((x - center[0])**2 + (y - center[1])**2)
-            r = r.astype(np.int)
+            r = r.astype(int)
             
             tbin = np.bincount(r.ravel(), weights=data.ravel())
             nr = np.bincount(r.ravel())
-            nr[nr == 0] = 1  # Avoid division by zero
+            nr[nr == 0] = 1  
             
             return np.arange(len(tbin)), tbin / nr
         
@@ -902,11 +902,11 @@ def process_sar_file_v2(sar_filepath, era5_wspd, era5_wdir, seed=None):
         distances = distances[:min_length]
         radial_psd = radial_psd[:min_length]
 
-        pixel_size = 5  # Using 5m for Wave mode based on research
+        pixel_size = 5  
         k_values = distances * (1.0 / (pixel_size * max(psd.shape)))
 
         return {
-
+            'sar_filepath': sar_filepath,
             'radial_psd': radial_psd,
         }
     except Exception as e:
