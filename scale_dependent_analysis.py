@@ -32,6 +32,7 @@ import tqdm
 from utils.functions import (
     process_sar_file,
     process_sar_file_v2,
+    process_sar_file_v3,
     plot_focused_analysis,
     kruskal_wallis_test,
     perform_statistical_tests,
@@ -71,7 +72,29 @@ def process_radial_psd(record):
         print(f"Error processing {record['sar_filepath']}: {e}")
         return None
     
-        
+def process_radial_wind(record):
+    """Process only the radial wind for a SAR file"""
+    try:
+        print(f"Processing {record['sar_filepath']} for radial wind...")
+
+        result = process_sar_file_v3(
+            record['sar_filepath'],
+            record['era5_wspd'],
+            record['era5_wdir'],
+            record.get('seed')
+        )
+
+        if result is not None:
+            return {
+                'sar_filepath': record['sar_filepath'],
+                'radial_wind_psd': result['radial_wind_psd'],
+                'k_values_wind': result['k_values_wind']
+            }
+        return None
+    except Exception as e:
+        print(f"Error processing {record['sar_filepath']} for radial wind: {e}")
+        return None
+    
 def add_radial_psd(record):
     try:
         result = process_sar_file_v2(
@@ -235,10 +258,56 @@ def main():
         })
     
     # Check if result files already exist
+
     wv1_result_path = Path('msc-thesis/results/wv1_results.parquet')
     wv2_result_path = Path('msc-thesis/results/wv2_results.parquet')
+    wv1_results_updated_path = Path('msc-thesis/results/wv1_results_updated.parquet')
+    wv2_results_updated_path = Path('msc-thesis/results/wv2_results_updated.parquet')
+
+    # check if result file exists on pc (not delftblue)
+
+    # wv1_result_path = Path("results/wv1_results.parquet")
+    # wv2_result_path = Path("results/wv2_results.parquet")
+    # wv1_results_updated_path = Path("results/wv1_results_updated.parquet")
+    # wv2_results_updated_path = Path("results/wv2_results_updated.parquet")
     
     if wv1_result_path.exists() and wv2_result_path.exists():
+        if wv1_results_updated_path.exists() and wv2_results_updated_path.exists():
+            print("Found existing result_updated files. Loading and appending wind_radial_psd...")
+
+            df_results_wv1 = pd.read_parquet(wv1_results_updated_path)
+            df_results_wv2 = pd.read_parquet(wv2_results_updated_path)
+
+            # Process WV1 files for radial wind
+            print(f"Processing {len(records_wv1)} WV1 files for radial wind using {args.num_processes} processes...")
+            with Pool(processes=args.num_processes) as pool:
+                radial_results_wv1 = list(tqdm.tqdm(
+                    pool.imap_unordered(process_radial_wind, records_wv1),
+                    total=len(records_wv1),
+                ))
+
+            # Filter out None results and create DataFrame
+            radial_results_wv1 = [result for result in radial_results_wv1 if result is not None]
+            df_radial_wv1 = pd.DataFrame(radial_results_wv1)
+
+            # Process WV2 files for radial wind
+            print(f"Processing {len(records_wv2)} WV2 files for radial wind...")
+            with Pool(processes=args.num_processes) as pool:
+                radial_results_wv2 = list(tqdm.tqdm(
+                    pool.imap_unordered(process_radial_wind, records_wv2),
+                    total=len(records_wv2),
+                ))
+
+            # filter out None results and create DataFrame
+            radial_results_wv2 = [result for result in radial_results_wv2 if result is not None]
+            df_radial_wv2 = pd.DataFrame(radial_results_wv2)
+
+            print("Saving updated results with wind_radial_psd...")
+            df_radial_wv1.to_parquet(output_path / "wv1_wind_results.parquet")
+            df_radial_wv2.to_parquet(output_path / "wv2_wind_results.parquet")
+
+            return
+
         print("Found existing result files. Loading and appending radial_psd...")
         
         # Load existing results
@@ -269,14 +338,6 @@ def main():
         radial_results_wv2 = [result for result in radial_results_wv2 if result is not None]
         df_radial_wv2 = pd.DataFrame(radial_results_wv2)
 
-        # Add this right after creating the DataFrames
-        print(f"Length of radial_results_wv1: {len(radial_results_wv1)}")
-        print(f"First few results: {radial_results_wv1[:2] if radial_results_wv1 else 'None'}")
-        print(f"Length of df_radial_wv1: {len(df_radial_wv1)}")
-        
-        print("df_results_wv1 columns:", df_results_wv1.columns.tolist())
-        print("df_radial_wv1 columns:", df_radial_wv1.columns.tolist())
-
         # Merge radial PSD results with existing results
         df_results_wv1 = pd.merge(
             df_results_wv1, 
@@ -296,7 +357,7 @@ def main():
         print("Saving updated results with radial_psd...")
         df_results_wv1.to_parquet(output_path / "wv1_results_updated.parquet")
         df_results_wv2.to_parquet(output_path / "wv2_results_updated.parquet")
-        
+
     else:
         # Process SAR files in parallel
         print(f"No existing result files found. Processing {len(records_wv1)} WV1 files in parallel using {args.num_processes} processes...")

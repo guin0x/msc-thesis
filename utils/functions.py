@@ -913,3 +913,81 @@ def process_sar_file_v2(sar_filepath, era5_wspd, era5_wdir, seed=None):
     except Exception as e:
         print(f"Error processing {sar_filepath} for radial PSD: {e}")
         return None
+    
+def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
+    """Process a single SAR file to calculate radial wind PSD."""
+    try:
+        sar_ds = read_sar_data(sar_filepath)
+        if sar_ds is None:
+            return None
+        
+        sigma_sar = sar_ds.sigma0.values
+        incidence = sar_ds.incidence.values
+        ground_heading = sar_ds.ground_heading.values
+        azimuth_look = np.mod(ground_heading + 90, 360)
+
+        if sigma_sar.ndim == 3:
+            sigma_sar = sigma_sar[0] 
+        
+        if np.isnan(sigma_sar[-1, :]).all():
+            sigma_sar = sigma_sar[:-1, :]
+            incidence = incidence[:-1, :]
+            ground_heading = ground_heading[:-1, :]
+
+        if np.isnan(sigma_sar[:, -1]).all():
+            sigma_sar = sigma_sar[:, :-1]
+            incidence = incidence[:, :-1]
+            ground_heading = ground_heading[:, :-1]
+    
+        phi = compute_phi(era5_wdir, azimuth_look)
+
+        wind_field = cmod5n_inverse(sigma_sar, phi, incidence)
+
+        # Calculate radial profile
+        def radial_profile(data, center=None):
+            y, x = np.indices(data.shape)
+            if center is None:
+                center = np.array([(x.max() - x.min()) / 2.0, (y.max() - y.min()) / 2.0])
+            
+            r = np.sqrt((x - center[0])**2 + (y - center[1])**2)
+            r = r.astype(int)
+            
+            tbin = np.bincount(r.ravel(), weights=data.ravel())
+            nr = np.bincount(r.ravel())
+            nr[nr == 0] = 1  
+            
+            return np.arange(len(tbin)), tbin / nr
+        
+        def process_wind_field(wind_field):
+            # Compute 2D FFT of the wind field
+            fft_wind = np.fft.fft2(wind_field)
+            
+            # Shift zero-frequency to the center
+            fft_shifted = np.fft.fftshift(fft_wind)
+            
+            # Compute PSD (power spectral density)
+            psd = np.abs(fft_shifted)**2
+            
+            # Radial integration (as in your existing code)
+            distances, radial_psd = radial_profile(psd)
+            
+            return radial_psd, distances, psd
+
+        radial_wind_psd, distances, psd_wind = process_wind_field(wind_field)
+        
+        min_length = min(len(distances), len(radial_psd))
+        distances = distances[:min_length]
+        radial_psd = radial_psd[:min_length]
+
+        pixel_size = 5  
+        k_values_wind = distances * (1.0 / (pixel_size * max(psd_wind.shape)))
+
+        return {
+            'sar_filepath': sar_filepath,
+            'radial_wind_psd': radial_wind_psd,
+            'k_values_wind': k_values_wind,
+        }
+    
+    except Exception as e:
+        print(f"Error processing {sar_filepath} for radial PSD: {e}")
+        return None
