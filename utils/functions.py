@@ -924,7 +924,7 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         sigma_sar = sar_ds.sigma0.values
         incidence = sar_ds.incidence.values
         ground_heading = sar_ds.ground_heading.values
-        azimuth_look = np.mod(ground_heading + 90, 360)
+        
 
         if sigma_sar.ndim == 3:
             sigma_sar = sigma_sar[0] 
@@ -938,9 +938,12 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             sigma_sar = sigma_sar[:, :-1]
             incidence = incidence[:, :-1]
             ground_heading = ground_heading[:, :-1]
-    
+        
+        azimuth_look = np.mod(ground_heading + 90, 360)
+        
+        
         phi = compute_phi(era5_wdir, azimuth_look)
-
+        
         wind_field = cmod5n_inverse(sigma_sar, phi, incidence)
 
         # Calculate radial profile
@@ -985,5 +988,5 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         }
     
     except Exception as e:
-        print(f"Error processing {sar_filepath} for radial PSD: {e}")
+        print(f"Error processing {sar_filepath} for radial wind: {e}")
         return None
