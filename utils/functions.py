@@ -959,25 +959,21 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             return np.arange(len(tbin)), tbin / nr
         
         def process_wind_field(wind_field):
-            # Compute 2D FFT of the wind field
             fft_wind = np.fft.fft2(wind_field)
             
-            # Shift zero-frequency to the center
             fft_shifted = np.fft.fftshift(fft_wind)
             
-            # Compute PSD (power spectral density)
             psd = np.abs(fft_shifted)**2
             
-            # Radial integration (as in your existing code)
             distances, radial_psd = radial_profile(psd)
             
             return radial_psd, distances, psd
 
         radial_wind_psd, distances, psd_wind = process_wind_field(wind_field)
         
-        min_length = min(len(distances), len(radial_psd))
+        min_length = min(len(distances), len(radial_wind_psd))
         distances = distances[:min_length]
-        radial_psd = radial_psd[:min_length]
+        radial_wind_psd = radial_wind_psd[:min_length]
 
         pixel_size = 5  
         k_values_wind = distances * (1.0 / (pixel_size * max(psd_wind.shape)))
