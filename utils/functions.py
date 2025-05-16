@@ -8,6 +8,7 @@ from scipy.stats import kruskal
 from statsmodels.stats.multitest import multipletests
 import matplotlib as mpl
 from matplotlib.ticker import LogLocator
+from tqdm import tqdm
 
 def read_sar_data(filepath):
     """Read SAR data from a given filepath."""
@@ -819,7 +820,7 @@ def process_sar_file_v2(sar_filepath, era5_wspd, era5_wdir, seed=None):
         distances = distances[:min_length]
         radial_psd = radial_psd[:min_length]
 
-        pixel_size = 5  
+        pixel_size = 100
         k_values = distances * (1.0 / (pixel_size * max(psd.shape)))
 
         return {
@@ -857,7 +858,6 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             ground_heading = ground_heading[:, :-1]
         
         azimuth_look = np.mod(ground_heading + 90, 360)
-        
         
         phi = compute_phi(era5_wdir, azimuth_look)
         
@@ -908,7 +908,9 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         return None
     
 def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidence=0.95, 
-                               figsize=(12, 8), x_range=None, y_range=None, use_log_scale=True, wavelength=False):
+                               figsize=(12, 8), x_range=None, y_range=None, 
+                               use_log_scale=True, wavelength=False,
+                               bootstrap=True, ax=None):
     """
     Creates a scientific publication-quality plot of average spectral density with confidence intervals.
     
@@ -938,14 +940,23 @@ def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidenc
     wavelength : bool, optional
         If True, plot with wavelength (1/k) on x-axis instead of wavenumber
         (default: False)
+    bootstrap : bool, optional
+        If True, use bootstrap method for confidence intervals (default: True)
+    ax : matplotlib.axes.Axes, optional
+        If provided, plot on this axes instead of creating a new one (default: None)
     """
     
     plt.style.use('seaborn-v0_8-whitegrid')
     
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
     
-    fig, ax = plt.subplots(figsize=figsize, dpi=120)
-    
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize, dpi=120)
+        create_new_fig = True
+    else:
+        create_new_fig = False
+        fig = ax.figure
+
     mpl.rcParams.update({
         'font.family': 'sans-serif',
         'font.sans-serif': ['Arial', 'Helvetica', 'DejaVu Sans'],
@@ -972,7 +983,7 @@ def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidenc
     for i, (df, title) in enumerate(zip(df_list, title_list)):
         if "Wind" in title:
             column_name = 'radial_wind_psd_padded'
-        elif "PSD" in title:
+        elif "Sigma" in title:
             column_name = 'radial_psd_padded'
         else:
             column_name = 'radial_psd_padded'  
@@ -990,20 +1001,28 @@ def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidenc
                         values_list.append(arr)
             else:
                 raise ValueError("Expected array-like values in column")
+            
             all_values = np.vstack(values_list)
             
             mean_values = np.nanmean(all_values, axis=0)
             sem_values = stats.sem(all_values, axis=0, nan_policy='omit')
             
             df_stats = all_values.shape[0] - 1  
-            
-            t_critical = stats.t.ppf(1 - alpha/2, df_stats)
-            ci_lower = mean_values - t_critical * sem_values
-            ci_upper = mean_values + t_critical * sem_values
-            
-            ci_lower = np.maximum(ci_lower, np.min(mean_values) * 0.01)
+
+            if not bootstrap:
+                t_critical = stats.t.ppf(1 - alpha/2, df_stats)
+                ci_lower = mean_values - t_critical * sem_values
+                ci_upper = mean_values + t_critical * sem_values
             
             total_range_observations = len(values_list)
+
+            if bootstrap:
+                results_bootstrap = block_bootstrap_psd(df, column_name, k_values, n_bootstrap=1000)
+
+                ci_lower = results_bootstrap['ci_lower_95']
+                ci_upper = results_bootstrap['ci_upper_95']
+
+            ci_lower = np.maximum(ci_lower, np.min(mean_values) * 0.01)
             
             if use_log_scale:
                 main_line = ax.loglog(x_values, mean_values, 
@@ -1065,8 +1084,8 @@ def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidenc
         ax.set_xlabel(r'Wavenumber [m$^-1$]', fontweight='bold')
     ax.set_ylabel(r'Power Spectral Density (PSD)', fontweight='bold')
     
-    range_info = ""
-    ax.set_title(f"{suptitle}{range_info}", fontweight='bold', fontsize=16)
+    type_of_ci = "Bootstrap" if bootstrap else "Parametric"
+    ax.set_title(f"{suptitle} - {type_of_ci}", fontweight='bold', fontsize=16)
     
     if x_range:
         ax.set_xlim(x_range)
@@ -1103,7 +1122,9 @@ def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidenc
             transform=ax.transAxes, fontsize=10, 
             bbox=dict(facecolor='white', alpha=0.7, boxstyle='round,pad=0.5'))
     
-    plt.tight_layout()
+    if create_new_fig:
+        plt.tight_layout()
+        plt.show()
     
     return fig, ax
 
@@ -1157,51 +1178,487 @@ def create_dfs_from_phi_interval(phi_bin, df_complete, df_results_updated, df_re
 
     return df_phi_interval, dfr_phi_interval, dfw_phi_interval
 
-def filter_similar_atmospheric_conditions(df, air_sea_temp_diff_range=(-3, -1), 
-                                       blh_range=(1400, 1600), rh_range=(70, 80)):
-   """
-   Filter a dataframe to include only rows with similar atmospheric conditions.
-   
-   Parameters:
-   -----------
-   df : pandas.DataFrame
-       Input dataframe containing meteorological variables
-   air_sea_temp_diff_range : tuple
-       Range (min, max) of acceptable air-sea temperature differences in °C
-   blh_range : tuple
-       Range (min, max) of acceptable boundary layer heights in meters
-   rh_range : tuple
-       Range (min, max) of acceptable relative humidity values in percent
-       
-   Returns:
-   --------
-   pandas.DataFrame
-       Filtered dataframe with only rows meeting the specified atmospheric conditions
-   """
-   df['air_sea_diff'] = df['airt'] - df['sst']
-   
-   filtered_df = df[
-       (df['air_sea_diff'] >= air_sea_temp_diff_range[0]) & 
-       (df['air_sea_diff'] <= air_sea_temp_diff_range[1]) &
-       
-       (df['blh'] >= blh_range[0]) & 
-       (df['blh'] <= blh_range[1]) &
-       
-       (df['rh'] >= rh_range[0]) & 
-       (df['rh'] <= rh_range[1]) &
+def filter_similar_atmospheric_conditions(df, air_sea_temp_diff_range=None, 
+                                       blh_range=None, rh_range=None,
+                                       wspd_range=None, L_range=None,
+                                       verbose=False):
+    """
+    Filter a dataframe to include only rows with similar atmospheric conditions.
     
-       (df['wspd'] > 15) &
-       (df['L'] < 0)
-   ]
-   
-   original_count = len(df)
-   filtered_count = len(filtered_df)
-   print(f"Filtered from {original_count} to {filtered_count} observations ({filtered_count/original_count:.1%} retained)")
-   
-   print("\nMean values before filtering:")
-   print(f"Air-Sea Diff: {df['air_sea_diff'].mean():.2f}°C, BLH: {df['blh'].mean():.0f}m, RH: {df['rh'].mean():.1f}%")
-   
-   print("\nMean values after filtering:")
-   print(f"Air-Sea Diff: {filtered_df['air_sea_diff'].mean():.2f}°C, BLH: {filtered_df['blh'].mean():.0f}m, RH: {filtered_df['rh'].mean():.1f}%")
-   
-   return filtered_df
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        Input dataframe containing meteorological variables
+    air_sea_temp_diff_range : tuple or None
+        Range (min, max) of acceptable air-sea temperature differences in °C
+        If None, no filtering is applied on this variable
+    blh_range : tuple or None
+        Range (min, max) of acceptable boundary layer heights in meters
+        If None, no filtering is applied on this variable
+    rh_range : tuple or None
+        Range (min, max) of acceptable relative humidity values in percent
+        If None, no filtering is applied on this variable
+    wspd_range : tuple or None
+        Range (min, max) of acceptable wind speed values
+        If None, no filtering is applied on this variable
+    L_range : tuple or None
+        Range (min, max) of acceptable L values
+        If None, no filtering is applied on this variable
+        
+    Returns:
+    --------
+    pandas.DataFrame
+        Filtered dataframe with only rows meeting the specified atmospheric conditions
+    """
+    # Create a copy to avoid modifying the original dataframe
+    df = df.copy()
+    
+    # Calculate air-sea temperature difference
+    df['air_sea_diff'] = df['airt'] - df['sst']
+    
+    # Start with all rows selected
+    mask = pd.Series(True, index=df.index)
+    
+    # Apply filters conditionally
+    if air_sea_temp_diff_range is not None:
+        mask &= (df['air_sea_diff'] >= air_sea_temp_diff_range[0]) & (df['air_sea_diff'] <= air_sea_temp_diff_range[1])
+    
+    if blh_range is not None:
+        mask &= (df['blh'] >= blh_range[0]) & (df['blh'] <= blh_range[1])
+    
+    if rh_range is not None:
+        mask &= (df['rh'] >= rh_range[0]) & (df['rh'] <= rh_range[1])
+    
+    if wspd_range is not None:
+        mask &= (df['wspd'] >= wspd_range[0]) & (df['wspd'] <= wspd_range[1])
+
+    if L_range is not None:
+        mask &= (df['L'] >= L_range[0]) & (df['L'] <= L_range[1])
+    else:
+        # If L_range is not provided, we always filter for L < 0
+        mask &= (df['L'] < 0)
+    
+    # Apply the mask
+    filtered_df = df[mask]
+    
+    # Display information
+    original_count = len(df)
+    filtered_count = len(filtered_df)
+    
+    if verbose:
+        print("=="*50)
+        print(f"Filtered from {original_count} to {filtered_count} observations ({filtered_count/original_count:.1%} retained)")
+
+        print("\nRange values after filtering:")
+        print(f"Air-Sea Diff: {filtered_df['air_sea_diff'].min():.2f} to {filtered_df['air_sea_diff'].max():.2f}°C, "\
+            f"BLH: {filtered_df['blh'].min():.0f} to {filtered_df['blh'].max():.0f} m, "\
+            f"RH: {filtered_df['rh'].min():.1f} to {filtered_df['rh'].max():.1f}%, "\
+            f"WSPD: {filtered_df['wspd'].min():.1f} to {filtered_df['wspd'].max():.1f} m/s, "\
+            f"L: {filtered_df['L'].min():.1f} to {filtered_df['L'].max():.1f}")
+        print("=="*50)
+
+    return filtered_df
+
+def block_bootstrap_psd(df, column_name, k_values, n_bootstrap=1000, block_size=None):
+    """
+    Perform block bootstrap resampling on PSD data to create robust confidence intervals.
+    
+    Parameters:
+    -----------
+    df : pandas DataFrame
+        DataFrame containing the PSD data
+    column_name : str
+        Name of column containing PSD arrays
+    k_values : array-like
+        The wavenumber values
+    n_bootstrap : int, optional
+        Number of bootstrap replicates (default: 1000)
+    block_size : int or None, optional
+        Size of blocks for block bootstrap. If None, will be automatically set
+        
+    Returns:
+    --------
+    dict
+        Dictionary containing:
+        - 'mean_values': mean of original data
+        - 'bootstrap_means': array of bootstrap means
+        - 'ci_lower_95': lower bound of 95% confidence interval
+        - 'ci_upper_95': upper bound of 95% confidence interval
+    """
+    # Extract array values
+    values_list = []
+    
+    if df[column_name].apply(lambda x: isinstance(x, (list, np.ndarray))).all():
+        for arr in df[column_name].values:
+            if len(arr) == len(k_values): 
+                values_list.append(arr)
+    else:
+        raise ValueError("Expected array-like values in column")
+        
+    all_values = np.vstack(values_list)
+    n_samples = all_values.shape[0]
+    
+    # If block_size not specified, set it to approximately sqrt(n) 
+    # which is a common heuristic for block bootstrap
+    if block_size is None:
+        block_size = max(int(np.sqrt(n_samples)), 1)
+    
+    print(f"Performing block bootstrap with {n_samples} samples, block size {block_size}, and {n_bootstrap} replicates")
+    
+    # Original mean
+    mean_values = np.nanmean(all_values, axis=0)
+    
+    # Storage for bootstrap means
+    bootstrap_means = np.zeros((n_bootstrap, len(k_values)))
+    
+    # Perform block bootstrap
+    for i in tqdm(range(n_bootstrap)):
+        # For block bootstrap, we sample blocks of indices
+        n_blocks = int(np.ceil(n_samples / block_size))
+        
+        # Generate random starting indices for blocks
+        start_indices = np.random.randint(0, n_samples - block_size + 1, size=n_blocks)
+        
+        # Create bootstrap sample indices by extending each starting index to a block
+        bootstrap_indices = []
+        for start in start_indices:
+            bootstrap_indices.extend(range(start, min(start + block_size, n_samples)))
+        
+        # Trim to original sample size 
+        bootstrap_indices = bootstrap_indices[:n_samples]
+        
+        # Create bootstrap sample and compute mean
+        bootstrap_sample = all_values[bootstrap_indices, :]
+        bootstrap_means[i, :] = np.nanmean(bootstrap_sample, axis=0)
+    
+    # Compute empirical confidence intervals (2.5th and 97.5th percentiles)
+    ci_lower = np.percentile(bootstrap_means, 2.5, axis=0)
+    ci_upper = np.percentile(bootstrap_means, 97.5, axis=0)
+    
+    return {
+        'mean_values': mean_values,
+        'bootstrap_means': bootstrap_means,
+        'ci_lower_95': ci_lower,
+        'ci_upper_95': ci_upper
+    }
+
+def plot_directional_differences(result_d, k_values, plot_type='wavelength', cmap='coolwarm', 
+                                figsize=(12, 10), vmin=None, vmax=None, title=None,
+                                max_wavelength=300):
+    """
+    Create a polar heatmap of the differences across phi angles and wavelengths/k-values.
+    
+    Parameters:
+    -----------
+    result_d : dict
+        Dictionary returned by compute_directional_differences containing the differences.
+    k_values : array-like
+        Array of k values used in the analysis.
+    plot_type : str, optional (default='wavelength')
+        Type of plot. Either 'wavelength' or 'k_values'.
+    cmap : str, optional (default='coolwarm')
+        Colormap to use for the heatmap.
+    figsize : tuple, optional (default=(12, 10))
+        Figure size (width, height) in inches.
+    vmin, vmax : float, optional
+        Min and max values for the colormap. If None, they are automatically determined.
+    title : str, optional
+        Title for the plot. If None, a default title is generated.
+    max_wavelength : float, optional (default=300)
+        Maximum wavelength to display in meters (for wavelength plot type only).
+    
+    Returns:
+    --------
+    fig, ax : matplotlib figure and axis objects
+        The created plot
+    """
+    
+    # Extract phi values and convert to radians
+    phi_strs = list(result_d.keys())
+    phi_ranges = [list(map(float, phi_str.strip('[)').split(','))) for phi_str in phi_strs]
+    phi_midpoints = np.array([sum(phi_range)/2 for phi_range in phi_ranges])  # Use midpoints
+
+    # Sort by phi midpoints to ensure correct order
+    sorted_indices = np.argsort(phi_midpoints)
+    phi_midpoints = phi_midpoints[sorted_indices]
+    phi_values = phi_midpoints
+
+    # Convert phi from -180:180 to radians for polar plotting
+    phi_radians = np.deg2rad(-phi_midpoints)
+    
+    # Convert k_values to wavelength if needed and handle zero/infinity
+    k_values_array = np.array(k_values)
+    
+    # Filter out zeros or very small values that would result in huge wavelengths
+    if plot_type.lower() == 'wavelength':
+        # Calculate wavelengths and filter
+        wavelengths = 2 * np.pi / k_values_array
+        valid_indices = (wavelengths > 0) & (wavelengths <= max_wavelength)
+        r_values = wavelengths[valid_indices]
+        r_label = 'Wavelength (m)'
+    else:
+        # Remove zeros for k_values plot
+        valid_indices = k_values_array > 0
+        r_values = k_values_array[valid_indices]
+        r_label = 'k values'
+    
+    print(f"Number of r values after filtering: {len(r_values)}")
+    print(f"Min/max r after filtering: {np.min(r_values):.2f}, {np.max(r_values):.2f}")
+    
+    # Extract difference data and organize into a 2D array
+    diff_data = np.zeros((len(phi_values), len(r_values)))
+    
+    for i, phi_str in enumerate(np.array(phi_strs)[sorted_indices]):
+        diff_array = result_d[phi_str]['wv1_wv2_diff']
+        # Only use the valid indices
+        if len(diff_array) >= len(valid_indices):
+            diff_data[i, :] = diff_array[valid_indices]
+        else:
+            # Handle mismatched lengths safely
+            print(f"Warning: diff array length ({len(diff_array)}) doesn't match k_values ({len(k_values_array)})")
+            # Use zeros as fallback
+            diff_data[i, :] = 0
+    
+    # Ensure no NaN or inf values
+    diff_data = np.nan_to_num(diff_data, nan=0.0, posinf=0.0, neginf=0.0)
+    
+    # Create figure with polar projection
+    fig, ax = plt.subplots(figsize=figsize, subplot_kw={'projection': 'polar'})
+    
+    # Create theta and r matrices for the polar plot
+    theta_2d, r_2d = np.meshgrid(phi_radians, r_values)
+
+    if vmin is None or vmax is None:
+        abs_max = np.max(np.abs(diff_data))
+        vmin = -abs_max
+        vmax = abs_max
+    
+    # Try pcolormesh first
+    try:
+        pcm = ax.pcolormesh(theta_2d, r_2d, diff_data.T, cmap=cmap, vmin=vmin, vmax=vmax, shading='auto')
+    except Exception as e:
+        print(f"pcolormesh failed: {e}, falling back to contourf")
+        # Fall back to contourf
+        levels = 50
+        pcm = ax.contourf(theta_2d, r_2d, diff_data.T, levels=levels, cmap=cmap, vmin=vmin, vmax=vmax)
+    
+    # Add colorbar
+    cbar = plt.colorbar(pcm, ax=ax, pad=0.1)
+    cbar.set_label('Difference in PSD')
+    
+    # Set title
+    if title is None:
+        title = f'Directional Differences in PSD by {r_label}'
+    ax.set_title(title, pad=20)
+    
+    # Format the plot
+    ax.set_theta_zero_location('E')  # 0 degrees at the top (North)
+    ax.set_theta_direction(-1)       # clockwise
+    
+    # Set the phi angle range from -180 to 180
+    ax.set_thetamin(-180)
+    ax.set_thetamax(180)
+    
+    # Add phi angle labels every 30 degrees - but avoid duplicate -180/180
+    theta_ticks = np.deg2rad(np.arange(-180, 181, 5))  # Include -180 and 180
+    ax.set_xticks(theta_ticks)
+    theta_labels = [f'{x}°' for x in range(-180, 181, 5)]  # Include -180 and 180
+    ax.set_xticklabels(theta_labels)
+    
+    ax.set_rscale('linear')
+    
+    # Define wavelength circles for radial grid (evenly spaced in log scale)
+    r_min = np.min(r_values)
+    r_max = np.max(r_values)
+    
+    # Clear all existing text labels first to avoid duplicates
+    for txt in ax.texts:
+        txt.set_visible(False)
+    
+    if plot_type.lower() == 'wavelength':
+        # Create approximately 5 wavelength ticks evenly distributed
+        # Round to nice numbers for wavelength
+        wavelength_ticks = []
+        
+        # For wavelengths, create roughly 5 nicely rounded values
+        if r_max <= 50:  # Small wavelengths
+            wavelength_ticks = [10, 20, 30, 40, 50]
+        elif r_max <= 100:
+            wavelength_ticks = [20, 40, 60, 80, 100]
+        elif r_max <= 200:
+            wavelength_ticks = [25, 50, 100, 150, 200]
+        else:  # Up to 300m
+            wavelength_ticks = [50, 100, 150, 200, 250, 300]
+            
+        # Keep only ticks within our range
+        wavelength_ticks = [w for w in wavelength_ticks if w >= r_min and w <= r_max]
+        
+        # Set radial ticks but make them completely invisible
+        ax.set_rticks(wavelength_ticks)
+        ax.set_yticklabels([''] * len(wavelength_ticks))  # Empty strings to hide default labels
+        
+        # Disable all built-in r-axis labels completely
+        ax.yaxis.set_tick_params(labelsize=0)  # Make them size 0
+        for label in ax.yaxis.get_ticklabels():
+            label.set_visible(False)  # Hide them completely
+        
+        # Turn off default grid
+        ax.grid(True, which='major', axis='x', linestyle='-', alpha=0.3)  # Keep angular grid
+        ax.grid(False, which='major', axis='y')  # Turn off default radial grid
+        
+        # Draw circles manually with improved visibility
+        theta = np.linspace(-np.pi, np.pi, 200)  # Full circle in radians
+        for wavelength in wavelength_ticks:
+            r = np.ones_like(theta) * wavelength
+            ax.plot(theta, r, '--', color='black', linewidth=1.0, alpha=0.8)
+        
+        # Add text labels at specific positions for each wavelength
+        # Use zorder to ensure they appear on top of everything else
+        label_angles = {
+            # Position labels at different angles for better readability
+            wavelength_ticks[0]: -np.pi/8,  # First tick (smallest) at -22.5°
+            wavelength_ticks[-1]: np.pi/8,  # Last tick (largest) at +22.5°
+        }
+        
+        # Place all wavelength labels
+        for wavelength in wavelength_ticks:
+            # Choose angle based on lookup or default to -45° (-π/4)
+            angle = label_angles.get(wavelength, -np.pi/4)
+            
+            # Add text with white background and high zorder to be on top
+            ax.text(angle, wavelength, f'{int(wavelength)} m', 
+                  fontsize=12, 
+                  fontweight='bold',
+                  bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3),
+                  ha='center', va='center',
+                  zorder=100)  # High zorder to be on top
+            
+        # Completely remove any r-axis labels
+        for lab in ax.yaxis.get_ticklabels():
+            lab.set_visible(False)
+            
+    else:
+        # For k-values, use a similar approach
+        # Turn off default grid
+        ax.grid(False, which='major', axis='y')
+        
+        # Make default ticks invisible
+        ax.set_yticklabels([''] * len(ax.get_yticks()))
+        
+        # Add manual grid and enhanced labels
+        k_ticks = ax.get_yticks()
+        theta = np.linspace(-np.pi, np.pi, 200)
+        for k in k_ticks:
+            r = np.ones_like(theta) * k
+            ax.plot(theta, r, '--', color='black', linewidth=1.0, alpha=0.8)
+            
+            # Add label with white background
+            ax.text(-np.pi/4, k, f'{k:.2f}', 
+                  fontsize=12, 
+                  fontweight='bold',
+                  bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=3),
+                  ha='center', va='center',
+                  zorder=100)
+    
+    # Handle tight_layout carefully
+    try:
+        fig.tight_layout()
+    except Exception as e:
+        print(f"Warning: tight_layout failed: {e}")
+    
+    return fig, ax
+
+def compute_directional_differences(df1, df2, df1r, df2r, df1w, df2w, k_values, phi_res=1):
+    """
+    Compute scale-dependent differences across phi angles
+    """
+
+    if 180 % phi_res != 0:
+        raise ValueError("phi_res must be a divisor of 180")
+    
+    phi_edges = np.arange(-180, 180, phi_res)  
+
+    result_d = {}
+
+    for i, v in enumerate(phi_edges):
+        # KEY FIX: Use the full range defined by phi_res
+        next_edge = v + phi_res
+        if next_edge > 180:  # Handle edge case at the boundary
+            next_edge = 180
+            
+        phi_range_str = f"[{v}, {next_edge})"
+        
+        try:
+            _, _, df1w_rg = create_dfs_from_phi_interval(phi_range_str, df1, df1r, df1w)
+            _, _, df2w_rg = create_dfs_from_phi_interval(phi_range_str, df2, df2r, df2w)
+
+            wv1_wind_psd = df1w_rg['radial_wind_psd'].values[0]
+            wv2_wind_psd = df2w_rg['radial_wind_psd'].values[0]
+
+            padding_size_wv1 = len(k_values) - len(wv1_wind_psd)
+            padding_size_wv2 = len(k_values) - len(wv2_wind_psd)
+
+            wv1_wind_psd_padded = np.pad(wv1_wind_psd, (0, padding_size_wv1), 'constant', constant_values=0)
+            wv2_wind_psd_padded = np.pad(wv2_wind_psd, (0, padding_size_wv2), 'constant', constant_values=0)
+
+            # Ensure consistent calculation of difference
+            wv1_wv2_diff = wv1_wind_psd_padded - wv2_wind_psd_padded
+
+            result_d[phi_range_str] = {
+                'wv1_wv2_diff': wv1_wv2_diff
+            }
+
+        except Exception as e:
+            print(f"Error processing phi range {phi_range_str}: {e}")
+            continue
+
+    return result_d
+
+def construct_df(a, b, df1, df1r, df1w, df2, df2r, df2w):
+    """
+    Constructs filtered DataFrames based on phi intervals from a to b in steps of 1.
+    
+    Parameters:
+    a (int): Start of the range (inclusive)
+    b (int): End of the range (exclusive)
+    df1, df1r, df1w, df2, df2r, df2w (pandas.DataFrame): Input DataFrames to filter
+    
+    Returns:
+    tuple: Tuple containing concatenated DataFmes (df1_filtered, df1r_filtered, df1w_filtered,
+                                                     df2_filtered, df2r_filtered, df2w_filtered)
+    """
+    # Initialize empty DataFrames to store filtered results
+    df1_filtered = pd.DataFrame()
+    df1r_filtered = pd.DataFrame()
+    df1w_filtered = pd.DataFrame()
+    df2_filtered = pd.DataFrame()
+    df2r_filtered = pd.DataFrame()
+    df2w_filtered = pd.DataFrame()
+    
+    # Create intervals from a to b in steps of 1
+    for i in range(a, b):
+        interval_str = f"[{i}, {i+1})"
+        # Filter each DataFrame based on the current interval
+        df1_interval, df1r_interval, df1w_interval = create_dfs_from_phi_interval(interval_str, df1, df1r, df1w)
+        df2_interval, df2r_interval, df2w_interval = create_dfs_from_phi_interval(interval_str, df2, df2r, df2w)
+        
+        # Concatenate results
+        df1_filtered = pd.concat([df1_filtered, df1_interval])
+        df1r_filtered = pd.concat([df1r_filtered, df1r_interval])
+        df1w_filtered = pd.concat([df1w_filtered, df1w_interval])
+        df2_filtered = pd.concat([df2_filtered, df2_interval])
+        df2r_filtered = pd.concat([df2r_filtered, df2r_interval])
+        df2w_filtered = pd.concat([df2w_filtered, df2w_interval])
+
+    # Reset phi_bins to new bins
+
+    df1_filtered["phi_bins"] = f"[{a}, {b})"
+    df1r_filtered["phi_bins"] = f"[{a}, {b})"
+    df1w_filtered["phi_bins"] = f"[{a}, {b})"
+
+    df2_filtered["phi_bins"] = f"[{a}, {b})"
+    df2r_filtered["phi_bins"] = f"[{a}, {b})"
+    df2w_filtered["phi_bins"] = f"[{a}, {b})"
+    
+    return (df1_filtered, df1r_filtered, df1w_filtered, 
+            df2_filtered, df2r_filtered, df2w_filtered)
