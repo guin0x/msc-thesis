@@ -1,27 +1,7 @@
 #!/usr/bin/env python
 
-"""
-Scale-Dependent Analysis of Wind Stress Variability (v2)
-
-This script implements a streamlined workflow for analyzing scale-dependent wind stress 
-variability using Sentinel-1 WV SAR data. 
-
-This version focuses on the most relevant analyses:
-1. Transfer function ratios
-2. Scale-dependent sensitivity
-3. Cross-scale impact analysis
-
-The script uses updated wavenumber bands:
-- Band 0a: k < 0.05
-- Band 0b: 0.05 ≤ k < 0.1
-- Band 1: 0.1 ≤ k < 0.3
-- Band 2: k ≥ 0.3
-"""
-
-import os
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 from pathlib import Path
 from multiprocessing import Pool
 import argparse
