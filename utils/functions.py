@@ -1680,21 +1680,27 @@ def create_filtered_dfs(df, name_prefix):
     
     for stability_name, stability_condition in stability_conditions:
         for i, (min_wspd, max_wspd) in enumerate(wspd_ranges):
-            # Create descriptive range names based on the actual values
-            if max_wspd == float('inf'):
-                range_desc = f'gt15'  # greater than 15
-            elif min_wspd == 0:
-                range_desc = f'0to5'  # 0 to 5
-            elif min_wspd == 5:
-                range_desc = f'5to10'  # 5 to 10
-            elif min_wspd == 10:
-                range_desc = f'10to15'  # 10 to 15
             
-            filtered_df = df[
-                (stability_condition(df.L)) & 
-                (df.wspd > min_wspd) & 
-                (df.wspd <= max_wspd if max_wspd != float('inf') else df.wspd > min_wspd)
-            ].copy()
+            if max_wspd == float('inf'):
+                range_desc = f'gt15'
+            elif min_wspd == 0:
+                range_desc = f'0to5'
+            elif min_wspd == 5:
+                range_desc = f'5to10'
+            elif min_wspd == 10:
+                range_desc = f'10to15'
+            
+            if max_wspd == float('inf'):
+                filtered_df = df[
+                    (stability_condition(df.L)) & 
+                    (df.wspd >= min_wspd)  # Changed > to >=
+                ].copy()
+            else:
+                filtered_df = df[
+                    (stability_condition(df.L)) & 
+                    (df.wspd >= min_wspd) &  # Changed > to >=
+                    (df.wspd <= max_wspd)
+                ].copy()
             
             df_name = f'{name_prefix}_{stability_name}_{range_desc}'
             filtered_dfs[df_name] = filtered_df
