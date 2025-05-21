@@ -1694,7 +1694,7 @@ def create_filtered_dfs(df, name_prefix):
                 (stability_condition(df.L)) & 
                 (df.wspd > min_wspd) & 
                 (df.wspd <= max_wspd if max_wspd != float('inf') else df.wspd > min_wspd)
-            ]
+            ].copy()
             
             df_name = f'{name_prefix}_{stability_name}_{range_desc}'
             filtered_dfs[df_name] = filtered_df
