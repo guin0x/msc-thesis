@@ -10,7 +10,7 @@ from glob import glob
 import os
 import logging
 import numpy as np
-from utils.functions import create_filtered_dfs, rename_filename, check_file_exists
+from utils.functions import create_filtered_dfs, rename_filename, check_file_exists, create_path_to_sar_file
 
 
 def main():
@@ -57,11 +57,12 @@ def main():
         # Check file existence
         results = [check_file_exists(f) for f in df["renamed_filename"].values]
         df.loc[:, "exists_ok"] = [r[0] for r in results]
-        df.loc[:, "path_to_sar_file"] = [r[1] for r in results]
+        
+        df.loc[:, "path_to_sar_file"] = df.apply(create_path_to_sar_file, axis=1)
         
         # Drop NaNs and convert path to string
         # df = df.dropna()
-        df.loc[:, "path_to_sar_file"] = df.path_to_sar_file.apply(lambda x: str(x))
+        
         
         # Save to parquet
         output_path = os.path.join(output_dir, f"batch2_{df_name}.parquet")
