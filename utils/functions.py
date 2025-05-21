@@ -1726,3 +1726,9 @@ def check_file_exists(filename):
         return True, path_2021
     else:
         return False, None
+    
+def create_path_to_sar_file(row):
+    s = row["renamed_filename"]
+    s = s.split("_")[5][:4]
+    sar_filepath = f"/projects/fluxsar/data/Sentinel1/WV/{s}/{row['renamed_filename']}"
+    return sar_filepath    
