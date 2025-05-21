@@ -24,7 +24,7 @@ def main():
     # Load data
     logger.info("Loading parquet files")
     data_path = '/projects/fluxsar/data/Sentinel1/dataframes_w_chen_classes'
-    output_dir = '/processed_data'
+    output_dir = '/home/gfeirreiraseco/msc-thesis/processed_data'
     
     all_df_files = glob(os.path.join(data_path, '*.parquet'))
     logger.info(f"Found {len(all_df_files)} files")
@@ -49,7 +49,7 @@ def main():
     for df_name, df in all_filtered_dfs.items():
         logger.info(f"Processing {df_name}")
         # Add renamed filename
-        df.loc[:, "renamed_filename"] = df.loc[:, "filename"].apply(rename_filename)
+        df.loc[:, "renamed_filename"] = df.loc[:, "filename"].apply(rename_filename).copy()
         
         # Check file existence
         results = [check_file_exists(f) for f in df["renamed_filename"].values]
