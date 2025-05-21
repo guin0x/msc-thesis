@@ -57,7 +57,7 @@ def main():
         df.loc[:, "path_to_sar_file"] = [r[1] for r in results]
         
         # Drop NaNs and convert path to string
-        df = df.dropna()
+        # df = df.dropna()
         df.loc[:, "path_to_sar_file"] = df.path_to_sar_file.apply(lambda x: str(x))
         
         # Save to parquet
