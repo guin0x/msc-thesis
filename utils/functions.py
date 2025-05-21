@@ -1662,3 +1662,61 @@ def construct_df(a, b, df1, df1r, df1w, df2, df2r, df2w):
     
     return (df1_filtered, df1r_filtered, df1w_filtered, 
             df2_filtered, df2r_filtered, df2w_filtered)
+
+def create_filtered_dfs(df, name_prefix):
+    filtered_dfs = {}
+    
+    wspd_ranges = [
+        (0, 5),
+        (5, 10),
+        (10, 15),
+        (15, float('inf')),
+    ]
+    
+    stability_conditions = [
+        ('unstable', lambda x: x < 0),
+        ('stable', lambda x: x > 0)
+    ]
+    
+    for stability_name, stability_condition in stability_conditions:
+        for i, (min_wspd, max_wspd) in enumerate(wspd_ranges):
+            # Create descriptive range names based on the actual values
+            if max_wspd == float('inf'):
+                range_desc = f'gt15'  # greater than 15
+            elif min_wspd == 0:
+                range_desc = f'0to5'  # 0 to 5
+            elif min_wspd == 5:
+                range_desc = f'5to10'  # 5 to 10
+            elif min_wspd == 10:
+                range_desc = f'10to15'  # 10 to 15
+            
+            filtered_df = df[
+                (stability_condition(df.L)) & 
+                (df.wspd > min_wspd) & 
+                (df.wspd <= max_wspd if max_wspd != float('inf') else df.wspd > min_wspd)
+            ]
+            
+            df_name = f'{name_prefix}_{stability_name}_{range_desc}'
+            filtered_dfs[df_name] = filtered_df
+    
+    return filtered_dfs
+
+def rename_filename(f):
+    f = f.split("/")[-1]
+    flist = f.split(".SAFE:")
+    f = flist[0] + "__" + flist[1] + ".nc"
+    return f 
+
+def check_file_exists(filename):
+    SARDATA_PATH = Path("/projects/fluxsar/data/Sentinel1/WV/")
+    SARDATA_PATH_2020 = SARDATA_PATH / "2020"
+    SARDATA_PATH_2021 = SARDATA_PATH / "2021"
+    path_2020 = SARDATA_PATH_2020 / filename
+    path_2021 = SARDATA_PATH_2021 / filename
+    
+    if path_2020.exists():
+        return True, path_2020
+    elif path_2021.exists():
+        return True, path_2021
+    else:
+        return False, None
