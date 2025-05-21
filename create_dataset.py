@@ -9,6 +9,7 @@ import pandas as pd
 from glob import glob
 import os
 import logging
+import numpy as np
 from utils.functions import create_filtered_dfs, rename_filename, check_file_exists
 
 
@@ -50,6 +51,8 @@ def main():
         logger.info(f"Processing {df_name}")
         # Add renamed filename
         df.loc[:, "renamed_filename"] = df.loc[:, "filename"].apply(rename_filename).copy()
+
+        df.loc[:, "wdir_deg_from_north"] = np.rad2deg(df.wdir) % 360
         
         # Check file existence
         results = [check_file_exists(f) for f in df["renamed_filename"].values]
