@@ -185,6 +185,8 @@ def main():
                         help='Number of processes to use for parallel processing.')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility.')
+    parser.add_argument("filename", type=str, default=None)
+
     args = parser.parse_args()
     
     # Set paths
@@ -193,16 +195,17 @@ def main():
     sar_data_path_2021 = Path(args.sardata2021)
     output_path = Path(args.output)
     output_path.mkdir(exist_ok=True, parents=True)
-    
+    filename = args.filename
+
     # Set random seed
     np.random.seed(args.seed)
     
     # Load data from parquet files
     print("Loading data from parquet files...")
     try:
-        df_wv1 = pd.read_parquet(processed_data_path / "wv1_complete.parquet")
-        df_wv2 = pd.read_parquet(processed_data_path / "wv2_complete.parquet")
-        print(f"Loaded {len(df_wv1)} WV1 records and {len(df_wv2)} WV2 records.")
+        df_wv1 = pd.read_parquet(processed_data_path / f"batch2_wv1_unstable_{filename}.parquet")
+        df_wv2 = pd.read_parquet(processed_data_path / f"batch2_wv2_unstable_{filename}.parquet")
+        print(f"Loaded {len(df_wv1)} WV1 records and {len(df_wv2)} WV2 records. Wind condition: {filename}")
     except Exception as e:
         print(f"Error loading parquet files: {e}")
         print("Make sure the 'processed_data' directory contains the required parquet files.")
@@ -239,10 +242,10 @@ def main():
     
     # Check if result files already exist
 
-    wv1_result_path = Path('msc-thesis/results/wv1_results.parquet')
-    wv2_result_path = Path('msc-thesis/results/wv2_results.parquet')
-    wv1_results_updated_path = Path('msc-thesis/results/wv1_results_updated.parquet')
-    wv2_results_updated_path = Path('msc-thesis/results/wv2_results_updated.parquet')
+    wv1_result_path = Path(f'msc-thesis/results/wv1_results_{filename}.parquet')
+    wv2_result_path = Path(f'msc-thesis/results/wv2_results_{filename}.parquet')
+    wv1_results_updated_path = Path(f'msc-thesis/results/wv1_results_updated_{filename}.parquet')
+    wv2_results_updated_path = Path(f'msc-thesis/results/wv2_results_updated_{filename}.parquet')
 
     # check if result file exists on pc (not delftblue)
 
@@ -283,8 +286,8 @@ def main():
             df_radial_wv2 = pd.DataFrame(radial_results_wv2)
 
             print("Saving updated results with wind_radial_psd...")
-            df_radial_wv1.to_parquet(output_path / "wv1_wind_results.parquet")
-            df_radial_wv2.to_parquet(output_path / "wv2_wind_results.parquet")
+            df_radial_wv1.to_parquet(output_path / f"wv1_wind_results_{filename}.parquet")
+            df_radial_wv2.to_parquet(output_path / f"wv2_wind_results_{filename}.parquet")
 
             return
 
@@ -335,8 +338,8 @@ def main():
         
         # Save updated results
         print("Saving updated results with radial_psd...")
-        df_results_wv1.to_parquet(output_path / "wv1_results_updated.parquet")
-        df_results_wv2.to_parquet(output_path / "wv2_results_updated.parquet")
+        df_results_wv1.to_parquet(output_path / f"wv1_results_updated_{filename}.parquet")
+        df_results_wv2.to_parquet(output_path / f"wv2_results_updated_{filename}.parquet")
 
     else:
         # Process SAR files in parallel
@@ -367,7 +370,7 @@ def main():
         
         end_time = datetime.now()
         print(f"Processing completed in {end_time - start_time}.")
-        print(f"Successfully processed {len(results_wv1)} WV1 files and {len(results_wv2)} WV2 files.")
+        print(f"Successfully processed {len(results_wv1)} WV1 files and {len(results_wv2)} WV2 files. Wind condition: {filename}")
         
         # Convert results to DataFrames
         df_results_wv1 = pd.DataFrame(results_wv1)
@@ -420,64 +423,8 @@ def main():
         
         # Save results to parquet files
         print("Saving results to parquet files...")
-        df_results_wv1.to_parquet(output_path / "wv1_results.parquet")
-        df_results_wv2.to_parquet(output_path / "wv2_results.parquet")
-
-    # # The rest of your analysis code continues as before...
-    # # Define band names
-    # band_names = ['band0a', 'band0b', 'band0c', 'band1', 'band2']
-
-    # # Analyze WV1 data
-    # print("Analyzing WV1 data...")
-    # has_scale_dependency_wv1, evidence_wv1, test_results_wv1 = analyze_scale_dependency(
-    #     df_results_wv1, output_path / "wv1_analysis", band_names
-    # )
-
-    # # Analyze WV2 data
-    # print("Analyzing WV2 data...")
-    # has_scale_dependency_wv2, evidence_wv2, test_results_wv2 = analyze_scale_dependency(
-    #     df_results_wv2, output_path / "wv2_analysis", band_names
-    # )
-
-    # # Combined analysis
-    # print("Performing combined analysis...")
-    # df_results_combined = pd.concat([df_results_wv1, df_results_wv2], ignore_index=True)
-
-    # has_scale_dependency_combined, evidence_combined, test_results_combined = analyze_scale_dependency(
-    #     df_results_combined, output_path / "combined_analysis", band_names
-    # )
-
-    # # Combined KW test for all bands
-    # all_bias0a = df_results_wv1['errors_band0a'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band0a'].apply(lambda x: x['bias']).tolist()
-    # all_bias0b = df_results_wv1['errors_band0b'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band0b'].apply(lambda x: x['bias']).tolist()
-    # all_bias0c = df_results_wv1['errors_band0c'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band0c'].apply(lambda x: x['bias']).tolist()
-    # all_bias1 = df_results_wv1['errors_band1'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band1'].apply(lambda x: x['bias']).tolist()
-    # all_bias2 = df_results_wv1['errors_band2'].apply(lambda x: x['bias']).tolist() + df_results_wv2['errors_band2'].apply(lambda x: x['bias']).tolist()
-
-    # statistic, p_value, is_significant = kruskal_wallis_test(all_bias0a, all_bias0b, all_bias0c, all_bias1, all_bias2)
-
-    # # Print summary findings to console
-    # print("\nOverall Scale Dependency Assessment:")
-    # print(f"WV1 Analysis: {'SCALE DEPENDENT' if has_scale_dependency_wv1 else 'Not scale dependent'}")
-    # for evidence in evidence_wv1:
-    #     print(f"  - {evidence}")
-        
-    # print(f"\nWV2 Analysis: {'SCALE DEPENDENT' if has_scale_dependency_wv2 else 'Not scale dependent'}")
-    # for evidence in evidence_wv2:
-    #     print(f"  - {evidence}")
-        
-    # print(f"\nCombined Analysis: {'SCALE DEPENDENT' if has_scale_dependency_combined else 'Not scale dependent'}")
-    # for evidence in evidence_combined:
-    #     print(f"  - {evidence}")
-
-    # print(f"\nStatistical Results (Combined Dataset):")
-    # print(f"Transfer Function Ratios: p-value = {test_results_combined['transfer_ratio']['p_value']:.6f}, {'SIGNIFICANT' if test_results_combined['transfer_ratio']['significant'] else 'not significant'}")
-    # print(f"Scale-Dependent Sensitivity: p-value = {test_results_combined['sensitivity']['p_value']:.6f}, {'SIGNIFICANT' if test_results_combined['sensitivity']['significant'] else 'not significant'}")
-    # print(f"Cross-Scale Analysis: p-value = {test_results_combined['cross_scale']['p_value']:.6f}, {'SIGNIFICANT' if test_results_combined['cross_scale']['significant'] else 'not significant'}")
-
-    # print(f"\nConclusion: GMF is {'SCALE-DEPENDENT' if is_significant else 'NOT scale-dependent'} based on combined Kruskal-Wallis test (p-value: {p_value:.6f})")
-
-    # print(f"\nAnalysis complete. Results saved to {output_path}")
+        df_results_wv1.to_parquet(output_path / f"wv1_results_{filename}.parquet")
+        df_results_wv2.to_parquet(output_path / f"wv2_results_{filename}.parquet")
 
 if __name__ == '__main__':
     main()
