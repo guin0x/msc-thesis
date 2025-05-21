@@ -894,7 +894,7 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         distances = distances[:min_length]
         radial_wind_psd = radial_wind_psd[:min_length]
 
-        pixel_size = 5  
+        pixel_size = 100
         k_values_wind = distances * (1.0 / (pixel_size * max(psd_wind.shape)))
 
         return {
