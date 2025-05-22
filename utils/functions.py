@@ -621,8 +621,8 @@ def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
         phi_perturbed_strong = compute_phi(wdir_perturbed_strong, azimuth_look)
         phi_nominal = compute_phi(era5_wdir, azimuth_look)
         
-        sigma_cmod = cmod5n_forward(wspd_perturbed, phi_perturbed, incidence)
-        sigma_cmod_strong = cmod5n_forward(wspd_perturbed_strong, phi_perturbed_strong, incidence)
+        sigma_cmod, b0_cmod, b1_cmod, b2_cmod = cmod5n_forward(wspd_perturbed, phi_perturbed, incidence)
+        sigma_cmod_strong, b0_cmod_strong, b1_cmod_strong, b2_cmod_strong = cmod5n_forward(wspd_perturbed_strong, phi_perturbed_strong, incidence)
         
         fft_sar, psd_sar, kx_sar, ky_sar, kmag_sar = compute_2d_fft(sigma_sar)
         fft_cmod, psd_cmod, kx_cmod, ky_cmod, kmag_cmod = compute_2d_fft(sigma_cmod)
@@ -646,11 +646,11 @@ def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
         band1_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0.1, 0.3)
         band2_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0.3, np.inf)
         
-        wspd_band0a = cmod5n_inverse(band0a_sar, phi_nominal, incidence)
-        wspd_band0b = cmod5n_inverse(band0b_sar, phi_nominal, incidence)
-        wspd_band0c = cmod5n_inverse(band0c_sar, phi_nominal, incidence)
-        wspd_band1 = cmod5n_inverse(band1_sar, phi_nominal, incidence)
-        wspd_band2 = cmod5n_inverse(band2_sar, phi_nominal, incidence)
+        wspd_band0a, _, _, _ = cmod5n_inverse(band0a_sar, phi_nominal, incidence)
+        wspd_band0b, _, _, _ = cmod5n_inverse(band0b_sar, phi_nominal, incidence)
+        wspd_band0c, _, _, _ = cmod5n_inverse(band0c_sar, phi_nominal, incidence)
+        wspd_band1, _, _, _ = cmod5n_inverse(band1_sar, phi_nominal, incidence)
+        wspd_band2, _, _, _ = cmod5n_inverse(band2_sar, phi_nominal, incidence)
         
         errors_band0a = calculate_error_metrics(wspd_band0a, era5_wspd)
         errors_band0b = calculate_error_metrics(wspd_band0b, era5_wspd)
@@ -686,23 +686,23 @@ def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
         )
         
         mix1_sigma0 = band0a_cmod + band0b_cmod + band0c_sar + band1_sar + band2_sar
-        wspd_mix1 = cmod5n_inverse(mix1_sigma0, phi_nominal, incidence)
+        wspd_mix1, _, _, _ = cmod5n_inverse(mix1_sigma0, phi_nominal, incidence)
         errors_mix1 = calculate_error_metrics(wspd_mix1, era5_wspd)
         
         mix2_sigma0 = band0a_sar + band0b_sar + band0c_cmod + band1_cmod + band2_cmod
-        wspd_mix2 = cmod5n_inverse(mix2_sigma0, phi_nominal, incidence)
+        wspd_mix2, _, _, _ = cmod5n_inverse(mix2_sigma0, phi_nominal, incidence)
         errors_mix2 = calculate_error_metrics(wspd_mix2, era5_wspd)
         
         mix3_sigma0 = band0a_cmod + band0b_cmod + band0c_cmod + band1_sar + band2_sar
-        wspd_mix3 = cmod5n_inverse(mix3_sigma0, phi_nominal, incidence)
+        wspd_mix3, _, _, _ = cmod5n_inverse(mix3_sigma0, phi_nominal, incidence)
         errors_mix3 = calculate_error_metrics(wspd_mix3, era5_wspd)
         
         mix4_sigma0 = band0a_sar + band0b_sar + band0c_sar + band1_cmod + band2_cmod
-        wspd_mix4 = cmod5n_inverse(mix4_sigma0, phi_nominal, incidence)
+        wspd_mix4, _, _, _ = cmod5n_inverse(mix4_sigma0, phi_nominal, incidence)
         errors_mix4 = calculate_error_metrics(wspd_mix4, era5_wspd)
 
         mix_sigma0 = band0a_sar + band0b_sar + band0c_sar + band1_sar + band2_sar
-        wspd_no_mix = cmod5n_inverse(mix_sigma0, phi_nominal, incidence)
+        wspd_no_mix, _, _, _ = cmod5n_inverse(mix_sigma0, phi_nominal, incidence)
         errors_no_mix = calculate_error_metrics(wspd_no_mix, era5_wspd)
         
         band0a_errors = wspd_band0a.flatten() - era5_wspd
@@ -861,7 +861,7 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         
         phi = compute_phi(era5_wdir, azimuth_look)
         
-        wind_field = cmod5n_inverse(sigma_sar, phi, incidence)
+        wind_field, b0, b1, b2 = cmod5n_inverse(sigma_sar, phi, incidence)
 
         def radial_profile(data, center=None):
             y, x = np.indices(data.shape)
@@ -901,6 +901,9 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'sar_filepath': sar_filepath,
             'radial_wind_psd': radial_wind_psd,
             'k_values_wind': k_values_wind,
+            'b0': b0,
+            'b1': b1,
+            'b2': b2,
         }
     
     except Exception as e:
@@ -1082,7 +1085,7 @@ def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidenc
         ax.set_xlabel(r'Wavelength [m]', fontweight='bold')
     else:
         ax.set_xlabel(r'Wavenumber [m$^-1$]', fontweight='bold')
-    ax.set_ylabel(r'Power Spectral Density (PSD)', fontweight='bold')
+    ax.set_ylabel(r'PSD', fontweight='bold')
     
     type_of_ci = "Bootstrap" if bootstrap else "Parametric"
     ax.set_title(f"{suptitle} - {type_of_ci}", fontweight='bold', fontsize=16)

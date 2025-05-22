@@ -8,6 +8,8 @@ import argparse
 from datetime import datetime
 import tqdm
 
+today_date = datetime.today().strftime('%Y-%m-%d')
+
 # Import custom functions
 from utils.functions import (
     process_sar_file,
@@ -201,11 +203,17 @@ def main():
     np.random.seed(args.seed)
     
     # Load data from parquet files
+    print(f"Date: {today_date}")
     print("Loading data from parquet files...")
     try:
-        df_wv1 = pd.read_parquet(processed_data_path / f"batch2_wv1_unstable_{filename}.parquet")
-        df_wv2 = pd.read_parquet(processed_data_path / f"batch2_wv2_unstable_{filename}.parquet")
-        print(f"Loaded {len(df_wv1)} WV1 records and {len(df_wv2)} WV2 records. Wind condition: {filename}")
+        if filename is not None:
+            df_wv1 = pd.read_parquet(processed_data_path / f"batch2_wv1_unstable_{filename}.parquet")
+            df_wv2 = pd.read_parquet(processed_data_path / f"batch2_wv2_unstable_{filename}.parquet")
+            print(f"Loaded {len(df_wv1)} WV1 records and {len(df_wv2)} WV2 records. Wind condition: {filename}")
+        else:
+            df_wv1 = pd.read_parquet(processed_data_path / "wv1_complete.parquet")
+            df_wv2 = pd.read_parquet(processed_data_path / "wv2_complete.parquet")
+            print(f"Loaded {len(df_wv1)} WV1 records and {len(df_wv2)} WV2 records.")
     except Exception as e:
         print(f"Error loading parquet files: {e}")
         print("Make sure the 'processed_data' directory contains the required parquet files.")
@@ -241,11 +249,16 @@ def main():
         })
     
     # Check if result files already exist
-
-    wv1_result_path = Path(f'msc-thesis/results/wv1_results_{filename}.parquet')
-    wv2_result_path = Path(f'msc-thesis/results/wv2_results_{filename}.parquet')
-    wv1_results_updated_path = Path(f'msc-thesis/results/wv1_results_updated_{filename}.parquet')
-    wv2_results_updated_path = Path(f'msc-thesis/results/wv2_results_updated_{filename}.parquet')
+    if filename is not None:
+        wv1_result_path = Path(f'msc-thesis/results/wv1_results_{filename}.parquet')
+        wv2_result_path = Path(f'msc-thesis/results/wv2_results_{filename}.parquet')
+        wv1_results_updated_path = Path(f'msc-thesis/results/wv1_results_updated_{filename}.parquet')
+        wv2_results_updated_path = Path(f'msc-thesis/results/wv2_results_updated_{filename}.parquet')
+    else:
+        wv1_result_path = Path("results/wv1_results.parquet")
+        wv2_result_path = Path("results/wv2_results.parquet")
+        wv1_results_updated_path = Path("results/wv1_results_updated.parquet")
+        wv2_results_updated_path = Path("results/wv2_results_updated.parquet")
 
     # check if result file exists on pc (not delftblue)
 
@@ -286,8 +299,12 @@ def main():
             df_radial_wv2 = pd.DataFrame(radial_results_wv2)
 
             print("Saving updated results with wind_radial_psd...")
-            df_radial_wv1.to_parquet(output_path / f"wv1_wind_results_{filename}.parquet")
-            df_radial_wv2.to_parquet(output_path / f"wv2_wind_results_{filename}.parquet")
+            if filename is not None:
+                df_radial_wv1.to_parquet(output_path / f"wv1_wind_results_{filename}.parquet")
+                df_radial_wv2.to_parquet(output_path / f"wv2_wind_results_{filename}.parquet")
+            else:
+                df_radial_wv1.to_parquet(output_path / "wv1_wind_results.parquet")
+                df_radial_wv2.to_parquet(output_path / "wv2_wind_results.parquet")
 
             return
 
@@ -338,8 +355,12 @@ def main():
         
         # Save updated results
         print("Saving updated results with radial_psd...")
-        df_results_wv1.to_parquet(output_path / f"wv1_results_updated_{filename}.parquet")
-        df_results_wv2.to_parquet(output_path / f"wv2_results_updated_{filename}.parquet")
+        if filename is not None:
+            df_results_wv1.to_parquet(output_path / f"wv1_results_updated_{filename}.parquet")
+            df_results_wv2.to_parquet(output_path / f"wv2_results_updated_{filename}.parquet")
+        else:
+            df_results_wv1.to_parquet(output_path / "wv1_results_updated.parquet")
+            df_results_wv2.to_parquet(output_path / "wv2_results_updated.parquet")
 
     else:
         # Process SAR files in parallel
@@ -423,8 +444,12 @@ def main():
         
         # Save results to parquet files
         print("Saving results to parquet files...")
-        df_results_wv1.to_parquet(output_path / f"wv1_results_{filename}.parquet")
-        df_results_wv2.to_parquet(output_path / f"wv2_results_{filename}.parquet")
+        if filename is not None:
+            df_results_wv1.to_parquet(output_path / f"wv1_results_{filename}.parquet")
+            df_results_wv2.to_parquet(output_path / f"wv2_results_{filename}.parquet")
+        else:
+            df_results_wv1.to_parquet(output_path / "wv1_results.parquet")
+            df_results_wv2.to_parquet(output_path / "wv2_results.parquet")
 
 if __name__ == '__main__':
     main()
