@@ -187,7 +187,7 @@ def main():
                         help='Number of processes to use for parallel processing.')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed for reproducibility.')
-    parser.add_argument("filename", type=str, default=None)
+    parser.add_argument("--filename", type=str, default=None)
 
     args = parser.parse_args()
     
