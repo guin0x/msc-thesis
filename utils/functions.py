@@ -863,6 +863,55 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         
         wind_field, b0, b1, b2 = cmod5n_inverse(sigma_sar, phi, incidence)
 
+        phi_bins = np.arange(-180, 181, 30)
+
+        b0_by_phi = {}
+        b1_by_phi = {}
+        b2_by_phi = {}
+        phi_bin_centers = []
+
+        for i in range(len(phi_bins) - 1):
+            phi_start = phi_bins[i]
+            phi_end = phi_bins[i + 1]
+            phi_center = (phi_start + phi_end) / 2
+            phi_bin_centers.append(phi_center)
+            
+            # Create mask for this phi range
+            mask = (phi >= phi_start) & (phi < phi_end)
+            
+            if np.sum(mask) > 10:  # Ensure enough points for meaningful statistics
+                b0_by_phi[phi_center] = {
+                    'median': np.median(b0[mask]),
+                    'mean': np.mean(b0[mask]),
+                    'std': np.std(b0[mask]),
+                    'p25': np.percentile(b0[mask], 25),
+                    'p75': np.percentile(b0[mask], 75),
+                    'count': np.sum(mask)
+                }
+                
+                b1_by_phi[phi_center] = {
+                    'median': np.median(b1[mask]),
+                    'mean': np.mean(b1[mask]),
+                    'std': np.std(b1[mask]),
+                    'p25': np.percentile(b1[mask], 25),
+                    'p75': np.percentile(b1[mask], 75),
+                    'count': np.sum(mask)
+                }
+                
+                b2_by_phi[phi_center] = {
+                    'median': np.median(b2[mask]),
+                    'mean': np.mean(b2[mask]),
+                    'std': np.std(b2[mask]),
+                    'p25': np.percentile(b2[mask], 25),
+                    'p75': np.percentile(b2[mask], 75),
+                    'count': np.sum(mask)
+                }
+            else:
+                # Not enough data points in this bin
+                b0_by_phi[phi_center] = None
+                b1_by_phi[phi_center] = None
+                b2_by_phi[phi_center] = None
+
         def radial_profile(data, center=None):
             y, x = np.indices(data.shape)
             if center is None:
@@ -901,9 +950,10 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'sar_filepath': sar_filepath,
             'radial_wind_psd': radial_wind_psd,
             'k_values_wind': k_values_wind,
-            'b0': b0,
-            'b1': b1,
-            'b2': b2,
+            'b0': b0_by_phi,
+            'b1': b1_by_phi,
+            'b2': b2_by_phi,
+            'phi_bin_centers': phi_bin_centers
         }
     
     except Exception as e:
