@@ -126,7 +126,7 @@ def cmod5n_forward(v, phi, theta):
     #  !  CMOD5_N: COMBINE THE THREE FOURIER TERMS
     cmod5_n = B0 * (1.0 + B1 * csfi + B2 * cs2_fi) ** z_pow
 
-    return cmod5_n
+    return cmod5_n, B0, B1, B2
 
 def cmod5n_inverse_MonteCarlo(sigma0, phi, theta):
     ################## not checked yet #########################
@@ -186,7 +186,7 @@ def cmod5n_inverse(sigma0_obs, phi, incidence, iterations=10):
 
     for iterno in range(1, iterations):
         # print iterno
-        sigma0_calc = cmod5n_forward(V, phi, incidence)
+        sigma0_calc, b0, b1, b2 = cmod5n_forward(V, phi, incidence)
     
         ind = sigma0_calc - sigma0_obs > 0
         
@@ -198,7 +198,7 @@ def cmod5n_inverse(sigma0_obs, phi, incidence, iterations=10):
     # from scipy.io import savemat
     # savemat('s0test',mdict)
 
-    return V
+    return V, b0, b1, b2
 
 
 # if __name__ == "__main__":
