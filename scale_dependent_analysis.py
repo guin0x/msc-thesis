@@ -255,10 +255,10 @@ def main():
         wv1_results_updated_path = Path(f'msc-thesis/results/wv1_results_updated_{filename}.parquet')
         wv2_results_updated_path = Path(f'msc-thesis/results/wv2_results_updated_{filename}.parquet')
     else:
-        wv1_result_path = Path("results/wv1_results.parquet")
-        wv2_result_path = Path("results/wv2_results.parquet")
-        wv1_results_updated_path = Path("results/wv1_results_updated.parquet")
-        wv2_results_updated_path = Path("results/wv2_results_updated.parquet")
+        wv1_result_path = Path("msc-thesis/results/wv1_results.parquet")
+        wv2_result_path = Path("msc-thesis/results/wv2_results.parquet")
+        wv1_results_updated_path = Path("msc-thesis/results/wv1_results_updated.parquet")
+        wv2_results_updated_path = Path("msc-thesis/results/wv2_results_updated.parquet")
 
     # check if result file exists on pc (not delftblue)
 
@@ -299,6 +299,7 @@ def main():
             df_radial_wv2 = pd.DataFrame(radial_results_wv2)
 
             print("Saving updated results with wind_radial_psd...")
+            
             if filename is not None:
                 df_radial_wv1.to_parquet(output_path / f"wv1_wind_results_{filename}.parquet")
                 df_radial_wv2.to_parquet(output_path / f"wv2_wind_results_{filename}.parquet")
