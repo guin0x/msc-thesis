@@ -63,9 +63,6 @@ def process_radial_wind(record):
             record['sar_filepath'],
             record['era5_wspd'],
             record['era5_wdir'],
-            record['b0'],
-            record['b1'],
-            record['b2'],
             record.get('seed')
         )
 
@@ -73,7 +70,10 @@ def process_radial_wind(record):
             return {
                 'sar_filepath': record['sar_filepath'],
                 'radial_wind_psd': result['radial_wind_psd'],
-                'k_values_wind': result['k_values_wind']
+                'k_values_wind': result['k_values_wind'],
+                'b0': result['b0'],
+                'b1': result['b1'],
+                'b2': result['b2'],
             }
         return None
     except Exception as e:
