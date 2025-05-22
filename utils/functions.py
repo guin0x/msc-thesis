@@ -9,6 +9,7 @@ from statsmodels.stats.multitest import multipletests
 import matplotlib as mpl
 from matplotlib.ticker import LogLocator
 from tqdm import tqdm
+import json
 
 def read_sar_data(filepath):
     """Read SAR data from a given filepath."""
@@ -946,6 +947,10 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         pixel_size = 100
         k_values_wind = distances * (1.0 / (pixel_size * max(psd_wind.shape)))
 
+        b0_by_phi = json.dumps({str(k): v for k, v in b0_by_phi.items()})
+        b1_by_phi = json.dumps({str(k): v for k, v in b1_by_phi.items()})
+        b2_by_phi = json.dumps({str(k): v for k, v in b2_by_phi.items()})
+
         return {
             'sar_filepath': sar_filepath,
             'radial_wind_psd': radial_wind_psd,
@@ -953,7 +958,7 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'b0': b0_by_phi,
             'b1': b1_by_phi,
             'b2': b2_by_phi,
-            'phi_bin_centers': phi_bin_centers
+            'phi_bin_centers': np.array(phi_bin_centers).astype(float).tolist()
         }
     
     except Exception as e:

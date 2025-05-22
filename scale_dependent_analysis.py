@@ -290,6 +290,11 @@ def main():
             radial_results_wv1 = [result for result in radial_results_wv1 if result is not None]
             df_radial_wv1 = pd.DataFrame(radial_results_wv1)
 
+            if filename is not None:
+                df_radial_wv1.to_parquet(output_path / f"wv1_wind_results_{filename}.parquet")
+            else:
+                df_radial_wv1.to_parquet(output_path / "wv1_wind_results.parquet")
+
             # Process WV2 files for radial wind
             print(f"Processing {len(records_wv2)} WV2 files for radial wind...")
             with Pool(processes=args.num_processes) as pool:
@@ -305,10 +310,8 @@ def main():
             print("Saving updated results with wind_radial_psd...")
 
             if filename is not None:
-                df_radial_wv1.to_parquet(output_path / f"wv1_wind_results_{filename}.parquet")
                 df_radial_wv2.to_parquet(output_path / f"wv2_wind_results_{filename}.parquet")
             else:
-                df_radial_wv1.to_parquet(output_path / "wv1_wind_results.parquet")
                 df_radial_wv2.to_parquet(output_path / "wv2_wind_results.parquet")
 
             return
@@ -350,7 +353,12 @@ def main():
             on='sar_filepath', 
             how='left'
         )
-        
+
+        if filename is not None:
+            df_results_wv1.to_parquet(output_path / f"wv1_results_updated_{filename}.parquet")
+        else:
+            df_results_wv1.to_parquet(output_path / "wv1_results_updated.parquet")
+
         df_results_wv2 = pd.merge(
             df_results_wv2, 
             df_radial_wv2, 
@@ -361,10 +369,8 @@ def main():
         # Save updated results
         print("Saving updated results with radial_psd...")
         if filename is not None:
-            df_results_wv1.to_parquet(output_path / f"wv1_results_updated_{filename}.parquet")
             df_results_wv2.to_parquet(output_path / f"wv2_results_updated_{filename}.parquet")
         else:
-            df_results_wv1.to_parquet(output_path / "wv1_results_updated.parquet")
             df_results_wv2.to_parquet(output_path / "wv2_results_updated.parquet")
 
     else:
@@ -439,6 +445,11 @@ def main():
             on='sar_filepath', 
             how='left'
         )
+
+        if filename is not None:
+            df_results_wv1.to_parquet(output_path / f"wv1_results_{filename}.parquet")
+        else:
+            df_results_wv1.to_parquet(output_path / "wv1_results.parquet")
         
         df_results_wv2 = pd.merge(
             df_results_wv2, 
@@ -450,10 +461,8 @@ def main():
         # Save results to parquet files
         print("Saving results to parquet files...")
         if filename is not None:
-            df_results_wv1.to_parquet(output_path / f"wv1_results_{filename}.parquet")
             df_results_wv2.to_parquet(output_path / f"wv2_results_{filename}.parquet")
         else:
-            df_results_wv1.to_parquet(output_path / "wv1_results.parquet")
             df_results_wv2.to_parquet(output_path / "wv2_results.parquet")
 
 if __name__ == '__main__':

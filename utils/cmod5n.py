@@ -128,36 +128,36 @@ def cmod5n_forward(v, phi, theta):
 
     return cmod5_n, B0, B1, B2
 
-def cmod5n_inverse_MonteCarlo(sigma0, phi, theta):
-    ################## not checked yet #########################
-    """! ---------
-        # wind direction and wind speed will be estimated 'cmod5n_inverse' only gives wind speed
-        inputs:
-            sigma0      NRCS vector
-            phi         azimuth angle vector (clockwise positive)
-            theta       incidence angle vector
+# def cmod5n_inverse_MonteCarlo(sigma0, phi, theta):
+#     ################## not checked yet #########################
+#     """! ---------
+#         # wind direction and wind speed will be estimated 'cmod5n_inverse' only gives wind speed
+#         inputs:
+#             sigma0      NRCS vector
+#             phi         azimuth angle vector (clockwise positive)
+#             theta       incidence angle vector
 
-        outputs:
-            ws          wind speed
-            wdir        wind direcion
+#         outputs:
+#             ws          wind speed
+#             wdir        wind direcion
 
 
-        __author__ = "Marcel Kleinherenbrink"
-        __email__ = "m.kleinherenbrink@tudelft.nl"
-    """
-    v = np.arange(5, 70, 5)
-    Delta = 1000
-    vdir = np.arange(-180, 180, 15)
-    for i in range(0, len(v)):
-        ## wind direction
-        for j in range(0, len(vdir)):
-            sigma0_calc = cmod5n_forward(v[i], vdir[j]-phi, theta)
-            if np.mean((sigma0 - sigma0_calc) ** 2) < Delta:
-                wdir = vdir[j]
-                ws = v[i]
-                Delta = np.absolute(np.mean((sigma_0 - sigma0_calc) ** 2))
+#         __author__ = "Marcel Kleinherenbrink"
+#         __email__ = "m.kleinherenbrink@tudelft.nl"
+#     """
+#     v = np.arange(5, 70, 5)
+#     Delta = 1000
+#     vdir = np.arange(-180, 180, 15)
+#     for i in range(0, len(v)):
+#         ## wind direction
+#         for j in range(0, len(vdir)):
+#             sigma0_calc = cmod5n_forward(v[i], vdir[j]-phi, theta)
+#             if np.mean((sigma0 - sigma0_calc) ** 2) < Delta:
+#                 wdir = vdir[j]
+#                 ws = v[i]
+#                 Delta = np.absolute(np.mean((sigma_0 - sigma0_calc) ** 2))
 
-    return ws, wdir
+#     return ws, wdir
 
 def cmod5n_inverse(sigma0_obs, phi, incidence, iterations=10):
     """!     ---------
