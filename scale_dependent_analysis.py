@@ -57,12 +57,15 @@ def process_radial_psd(record):
 def process_radial_wind(record):
     """Process only the radial wind for a SAR file"""
     try:
-        print(f"Processing {record['sar_filepath']} for radial wind...")
+        # print(f"Processing {record['sar_filepath']} for radial wind...")
 
         result = process_sar_file_v3(
             record['sar_filepath'],
             record['era5_wspd'],
             record['era5_wdir'],
+            record['b0'],
+            record['b1'],
+            record['b2'],
             record.get('seed')
         )
 
@@ -299,7 +302,7 @@ def main():
             df_radial_wv2 = pd.DataFrame(radial_results_wv2)
 
             print("Saving updated results with wind_radial_psd...")
-            
+
             if filename is not None:
                 df_radial_wv1.to_parquet(output_path / f"wv1_wind_results_{filename}.parquet")
                 df_radial_wv2.to_parquet(output_path / f"wv2_wind_results_{filename}.parquet")
