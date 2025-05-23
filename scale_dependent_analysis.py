@@ -74,7 +74,6 @@ def process_radial_wind(record):
                 'b0': result['b0'],
                 'b1': result['b1'],
                 'b2': result['b2'],
-                'phi_bin_centers': result['phi_bin_centers']
             }
         return None
     except Exception as e:
