@@ -844,7 +844,6 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         incidence = sar_ds.incidence.values
         ground_heading = sar_ds.ground_heading.values
         
-
         if sigma_sar.ndim == 3:
             sigma_sar = sigma_sar[0] 
         
@@ -859,17 +858,17 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             ground_heading = ground_heading[:, :-1]
         
         azimuth_look = np.mod(ground_heading + 90, 360)
-        
         phi = compute_phi(era5_wdir, azimuth_look)
-        
         wind_field, b0, b1, b2 = cmod5n_inverse(sigma_sar, phi, incidence)
 
+        # Define phi bins
         phi_bins = np.arange(-180, 181, 30)
-
-        b0_by_phi = {}
-        b1_by_phi = {}
-        b2_by_phi = {}
         phi_bin_centers = []
+        
+        # Initialize lists to store statistics for each bin
+        b0_stats = []
+        b1_stats = []
+        b2_stats = []
 
         for i in range(len(phi_bins) - 1):
             phi_start = phi_bins[i]
@@ -881,37 +880,32 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             mask = (phi >= phi_start) & (phi < phi_end)
             
             if np.sum(mask) > 10:  # Ensure enough points for meaningful statistics
-                b0_by_phi[phi_center] = {
-                    'median': np.median(b0[mask]),
-                    'mean': np.mean(b0[mask]),
-                    'std': np.std(b0[mask]),
-                    'p25': np.percentile(b0[mask], 25),
-                    'p75': np.percentile(b0[mask], 75),
-                    'count': np.sum(mask)
-                }
+                # Store only essential statistics as regular Python types
+                b0_stats.append({
+                    'median': float(np.median(b0[mask])),
+                    'mean': float(np.mean(b0[mask])),
+                    'std': float(np.std(b0[mask])),
+                    'count': int(np.sum(mask))  # Convert to regular Python int
+                })
                 
-                b1_by_phi[phi_center] = {
-                    'median': np.median(b1[mask]),
-                    'mean': np.mean(b1[mask]),
-                    'std': np.std(b1[mask]),
-                    'p25': np.percentile(b1[mask], 25),
-                    'p75': np.percentile(b1[mask], 75),
-                    'count': np.sum(mask)
-                }
+                b1_stats.append({
+                    'median': float(np.median(b1[mask])),
+                    'mean': float(np.mean(b1[mask])),
+                    'std': float(np.std(b1[mask])),
+                    'count': int(np.sum(mask))
+                })
                 
-                b2_by_phi[phi_center] = {
-                    'median': np.median(b2[mask]),
-                    'mean': np.mean(b2[mask]),
-                    'std': np.std(b2[mask]),
-                    'p25': np.percentile(b2[mask], 25),
-                    'p75': np.percentile(b2[mask], 75),
-                    'count': np.sum(mask)
-                }
+                b2_stats.append({
+                    'median': float(np.median(b2[mask])),
+                    'mean': float(np.mean(b2[mask])),
+                    'std': float(np.std(b2[mask])),
+                    'count': int(np.sum(mask))
+                })
             else:
-                # Not enough data points in this bin
-                b0_by_phi[phi_center] = None
-                b1_by_phi[phi_center] = None
-                b2_by_phi[phi_center] = None
+                # Not enough data points in this bin - store None or empty dict
+                b0_stats.append(None)
+                b1_stats.append(None)
+                b2_stats.append(None)
 
         def radial_profile(data, center=None):
             y, x = np.indices(data.shape)
@@ -929,13 +923,9 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         
         def process_wind_field(wind_field):
             fft_wind = np.fft.fft2(wind_field)
-            
             fft_shifted = np.fft.fftshift(fft_wind)
-            
             psd = np.abs(fft_shifted)**2
-            
             distances, radial_psd = radial_profile(psd)
-            
             return radial_psd, distances, psd
 
         radial_wind_psd, distances, psd_wind = process_wind_field(wind_field)
@@ -947,18 +937,14 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         pixel_size = 100
         k_values_wind = distances * (1.0 / (pixel_size * max(psd_wind.shape)))
 
-        b0_by_phi = json.dumps({str(k): v for k, v in b0_by_phi.items()})
-        b1_by_phi = json.dumps({str(k): v for k, v in b1_by_phi.items()})
-        b2_by_phi = json.dumps({str(k): v for k, v in b2_by_phi.items()})
-
         return {
             'sar_filepath': sar_filepath,
-            'radial_wind_psd': radial_wind_psd,
-            'k_values_wind': k_values_wind,
-            'b0': b0_by_phi,
-            'b1': b1_by_phi,
-            'b2': b2_by_phi,
-            'phi_bin_centers': np.array(phi_bin_centers).astype(float).tolist()
+            'radial_wind_psd': radial_wind_psd.tolist(),  # Convert to regular Python list
+            'k_values_wind': k_values_wind.tolist(),      # Convert to regular Python list
+            'b0': b0_stats,  # Already JSON-serializable
+            'b1': b1_stats,  # Already JSON-serializable
+            'b2': b2_stats,  # Already JSON-serializable
+            'phi_bin_centers': [float(x) for x in phi_bin_centers]  # Ensure regular Python floats
         }
     
     except Exception as e:
