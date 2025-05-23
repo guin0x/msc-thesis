@@ -861,51 +861,17 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         phi = compute_phi(era5_wdir, azimuth_look)
         wind_field, b0, b1, b2 = cmod5n_inverse(sigma_sar, phi, incidence)
 
-        # Define phi bins
-        phi_bins = np.arange(-180, 181, 30)
-        phi_bin_centers = []
+        b0_stats = {"mean": float(np.nanmean(b0)), 
+                    "median": float(np.nanmedian(b0)), 
+                    "std": float(np.nanstd(b0))}
         
-        # Initialize lists to store statistics for each bin
-        b0_stats = []
-        b1_stats = []
-        b2_stats = []
-
-        for i in range(len(phi_bins) - 1):
-            phi_start = phi_bins[i]
-            phi_end = phi_bins[i + 1]
-            phi_center = (phi_start + phi_end) / 2
-            phi_bin_centers.append(phi_center)
-            
-            # Create mask for this phi range
-            mask = (phi >= phi_start) & (phi < phi_end)
-            
-            if np.sum(mask) > 10:  # Ensure enough points for meaningful statistics
-                # Store only essential statistics as regular Python types
-                b0_stats.append({
-                    'median': float(np.median(b0[mask])),
-                    'mean': float(np.mean(b0[mask])),
-                    'std': float(np.std(b0[mask])),
-                    'count': int(np.sum(mask))  # Convert to regular Python int
-                })
-                
-                b1_stats.append({
-                    'median': float(np.median(b1[mask])),
-                    'mean': float(np.mean(b1[mask])),
-                    'std': float(np.std(b1[mask])),
-                    'count': int(np.sum(mask))
-                })
-                
-                b2_stats.append({
-                    'median': float(np.median(b2[mask])),
-                    'mean': float(np.mean(b2[mask])),
-                    'std': float(np.std(b2[mask])),
-                    'count': int(np.sum(mask))
-                })
-            else:
-                # Not enough data points in this bin - store None or empty dict
-                b0_stats.append(None)
-                b1_stats.append(None)
-                b2_stats.append(None)
+        b1_stats = {"mean": float(np.nanmean(b1)),
+                    "median": float(np.nanmedian(b1)), 
+                    "std": float(np.nanstd(b1))}
+        
+        b2_stats = {"mean": float(np.nanmean(b2)),
+                    "median": float(np.nanmedian(b2)), 
+                    "std": float(np.nanstd(b2))}
 
         def radial_profile(data, center=None):
             y, x = np.indices(data.shape)
@@ -944,7 +910,6 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'b0': b0_stats,  # Already JSON-serializable
             'b1': b1_stats,  # Already JSON-serializable
             'b2': b2_stats,  # Already JSON-serializable
-            'phi_bin_centers': [float(x) for x in phi_bin_centers]  # Ensure regular Python floats
         }
     
     except Exception as e:
