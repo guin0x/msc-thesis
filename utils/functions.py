@@ -75,6 +75,11 @@ def cmod5n_inverse(sigma0, phi, incidence):
     from utils.cmod5n import cmod5n_inverse
     return cmod5n_inverse(sigma0, phi, incidence)
 
+def cmod5n_inverse_enhanced(sigma0, phi, incidence, B3):
+    """CMOD5N inverse model to compute wind speeds from sigma0 using B3"""
+    from utils.cmod5n import cmod5n_inverse_enhanced
+    return cmod5n_inverse_enhanced(sigma0, phi, incidence, B3)
+
 def compute_2d_fft(sigma0):
     """Compute 2D FFT of sigma0 values."""
 
@@ -905,6 +910,18 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         pixel_size = 100
         k_values_wind = distances * (1.0 / (pixel_size * max(psd_wind.shape)))
 
+        # After computing radial_wind_psd and k_values_wind:
+        B3 = compute_B3(
+            k_values=np.array(k_values_wind), 
+            radial_psd=np.array(radial_wind_psd),
+            incidence_angle=np.nanmedian(incidence)  # Representative incidence angle
+        )
+
+        # Then in your enhanced inversion:
+        wind_field_enhanced = cmod5n_inverse_enhanced(
+            sigma_sar, phi, incidence, B3=B3
+        )
+
         return {
             'sar_filepath': sar_filepath,
             'radial_wind_psd': radial_wind_psd.tolist(),  # Convert to regular Python list
@@ -912,13 +929,52 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'b0': b0_stats,  # Already JSON-serializable
             'b1': b1_stats,  # Already JSON-serializable
             'b2': b2_stats,  # Already JSON-serializable
-            'wind_field_median': wind_field_median
+            'wind_field_median': wind_field_median,
+            'wind_field_enhanced_median': np.nanmedian(wind_field_enhanced)
         }
     
     except Exception as e:
         print(f"Error processing {sar_filepath} for radial wind: {e}")
         return None
     
+def compute_B3(k_values, radial_psd, incidence_angle):
+    """
+    Compute scale-dependent B3 term using PSD correlations
+    Returns scalar B3 value for the entire scene
+    """
+    # Critical wavelengths from your correlation analysis (in wavenumbers [m^-1])
+    if incidence_angle < 30:  # WV1 (23°)
+        peaks = [
+            (0.01, 0.005),    # 600m scale (k, sigma)
+            (0.003, 0.002),   # 2km scale
+            (0.001, 0.0005)   # 6km scale
+        ]
+        weights = [0.8, -0.3, 0.2]  # Correlation strengths from your plots
+    else:  # WV2 (36°)
+        peaks = [
+            (0.008, 0.004),   # 785m scale
+            (0.0025, 0.0015), # 2.5km scale
+            (0.0008, 0.0004)  # 7.85km scale
+        ]
+        weights = [0.7, -0.5, 0.1]
+
+    # Normalize PSD
+    psd_norm = (radial_psd - np.nanmean(radial_psd)) / np.nanstd(radial_psd)
+    
+    B3 = 0.0
+    for (k0, sigma), weight in zip(peaks, weights):
+        # Find closest spectral bin
+        idx = np.nanargmin(np.abs(k_values - k0))
+        
+        if not np.isnan(psd_norm[idx]):
+            # Gaussian weighting around target wavenumber
+            gauss_weight = np.exp(-(k_values[idx] - k0)**2/(2*sigma**2))
+            B3 += weight * psd_norm[idx] * gauss_weight
+
+    # Scale to match CMOD5.n coefficient magnitudes
+    B3 *= 0.03  # Empirical scaling factor from your data
+    return np.clip(B3, -0.05, 0.05)  # Prevent overcorrection
+
 def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidence=0.95, 
                                figsize=(12, 8), x_range=None, y_range=None, 
                                use_log_scale=True, wavelength=False,
@@ -1752,3 +1808,135 @@ def clean_stats(lst):
     for v in lst:
         if v is not None:
             return v
+        
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+def analyze_wind_bias(df, lbl, true_col='era5_wspd', retrieved_col='wind_field_median', 
+                     group_col='phi_bins', show_plots=True, figsize=(15, 10)):
+    """
+    Analyze bias between retrieved and true wind field data by grouping variable.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        Input dataframe containing wind data
+    true_col : str, default 'era5_wspd'
+        Column name for true/reference wind speed values
+    retrieved_col : str, default 'wind_field_median'
+        Column name for retrieved wind speed values
+    group_col : str, default 'phi_bins'
+        Column name for grouping variable (e.g., phi_bins)
+    show_plots : bool, default True
+        Whether to display visualization plots
+    figsize : tuple, default (15, 10)
+        Figure size for plots
+    
+    Returns:
+    --------
+    pandas.DataFrame
+        Complete bias statistics by group
+    """
+    
+    # Create a copy to avoid modifying original dataframe
+    df_work = df.copy()
+    
+    # Calculate bias (retrieved - true)
+    df_work['bias'] = df_work[retrieved_col] - df_work[true_col]
+    
+    # Group by specified column and calculate bias statistics
+    bias_stats = df_work.groupby(group_col).agg({
+        true_col: ['mean', 'std', 'count'],
+        retrieved_col: ['mean', 'std'],
+        'bias': ['mean', 'std', 'median']
+    }).round(3)
+    
+    # Flatten column names
+    bias_stats.columns = ['_'.join(col).strip() for col in bias_stats.columns]
+    
+    # Calculate additional metrics
+    additional_metrics = df_work.groupby(group_col).apply(lambda x: pd.Series({
+        'mae': np.mean(np.abs(x['bias'])),  # Mean Absolute Error
+        'rmse': np.sqrt(np.mean(x['bias']**2)),  # Root Mean Square Error
+        'correlation': x[true_col].corr(x[retrieved_col]),  # Correlation
+        'relative_bias_pct': (x['bias'].mean() / x[true_col].mean()) * 100  # Relative bias %
+    })).round(3)
+    
+    # Combine all statistics
+    final_stats = pd.concat([bias_stats, additional_metrics], axis=1)
+    
+    print(f"=== WIND FIELD BIAS ANALYSIS BY {group_col.upper()} ===\n")
+    print(f"Bias = {retrieved_col} - {true_col}")
+    print("Positive bias = overestimation, Negative bias = underestimation\n")
+    
+    print(final_stats)
+    
+    # Create visualization if requested
+    if show_plots:
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+        
+        # 1. Bias by group (boxplot)
+        df_work.boxplot(column='bias', by=group_col, ax=axes[0,0])
+        axes[0,0].set_title(f'Bias Distribution by {group_col}')
+        axes[0,0].set_xlabel(group_col)
+        axes[0,0].set_ylabel('Bias (m/s)')
+        axes[0,0].grid(True, alpha=0.3)
+        
+        # 2. Mean bias by group (bar plot)
+        mean_bias = df_work.groupby(group_col)['bias'].mean()
+        mean_bias.plot(kind='bar', ax=axes[0,1], color='coral')
+        axes[0,1].set_title(f'Mean Bias by {group_col}')
+        axes[0,1].set_xlabel(group_col)
+        axes[0,1].set_ylabel('Mean Bias (m/s)')
+        axes[0,1].axhline(y=0, color='black', linestyle='--', alpha=0.7)
+        axes[0,1].grid(True, alpha=0.3)
+        axes[0,1].tick_params(axis='x', rotation=45)
+        
+        # 3. Scatter plot: True vs Retrieved by group
+        for i, group_val in enumerate(df_work[group_col].unique()):
+            subset = df_work[df_work[group_col] == group_val]
+            axes[1,0].scatter(subset[true_col], subset[retrieved_col], 
+                             alpha=0.6, label=f'{group_col} {group_val}', s=20)
+        
+        # Add 1:1 line
+        min_val = min(df_work[true_col].min(), df_work[retrieved_col].min())
+        max_val = max(df_work[true_col].max(), df_work[retrieved_col].max())
+        axes[1,0].plot([min_val, max_val], [min_val, max_val], 
+                       'k--', alpha=0.8, label='1:1 line')
+        axes[1,0].set_xlabel(f'{true_col} (m/s)')
+        axes[1,0].set_ylabel(f'{retrieved_col} (m/s)')
+        axes[1,0].set_title(f'{true_col} vs {retrieved_col} by {group_col}')
+        axes[1,0].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        axes[1,0].grid(True, alpha=0.3)
+        
+        # 4. RMSE and MAE by group
+        metrics_plot = df_work.groupby(group_col).apply(lambda x: pd.Series({
+            'RMSE': np.sqrt(np.mean(x['bias']**2)),
+            'MAE': np.mean(np.abs(x['bias']))
+        }))
+        
+        metrics_plot.plot(kind='bar', ax=axes[1,1])
+        axes[1,1].set_title(f'RMSE and MAE by {group_col}')
+        axes[1,1].set_xlabel(group_col)
+        axes[1,1].set_ylabel('Error (m/s)')
+        axes[1,1].legend()
+        axes[1,1].grid(True, alpha=0.3)
+        axes[1,1].tick_params(axis='x', rotation=45)
+        
+        plt.suptitle(lbl)
+        plt.tight_layout()
+        plt.show()
+    
+    # Print summary interpretation
+    print("\n=== INTERPRETATION GUIDE ===")
+    print("• Mean Bias: Average difference (retrieved - true)")
+    print("  - Positive = systematic overestimation")
+    print("  - Negative = systematic underestimation")
+    print("• MAE: Mean Absolute Error (average magnitude of errors)")
+    print("• RMSE: Root Mean Square Error (penalizes larger errors more)")
+    print("• Correlation: Linear relationship strength (-1 to 1)")
+    print("• Relative Bias %: Bias as percentage of true mean value")
+    
+    return final_stats
