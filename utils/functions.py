@@ -861,6 +861,8 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         phi = compute_phi(era5_wdir, azimuth_look)
         wind_field, b0, b1, b2 = cmod5n_inverse(sigma_sar, phi, incidence)
 
+        wind_field_median = np.nanmedian(wind_field)
+
         b0_stats = {"mean": float(np.nanmean(b0)), 
                     "median": float(np.nanmedian(b0)), 
                     "std": float(np.nanstd(b0))}
@@ -910,6 +912,7 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'b0': b0_stats,  # Already JSON-serializable
             'b1': b1_stats,  # Already JSON-serializable
             'b2': b2_stats,  # Already JSON-serializable
+            'wind_field_median': wind_field_median
         }
     
     except Exception as e:
@@ -1162,10 +1165,10 @@ def get_k_values(df, column_name):
     
     return k_values
 
-def create_phi_bins_columns(df):
+def create_phi_bins_columns(df, col, v=1):
     df['phi_bins'] = pd.cut(
-    df['phi_nominal_median'], 
-    bins=np.arange(-180, 181, 1),
+    df[col], 
+    bins=np.arange(-180, 181, v),
     right=False, 
     include_lowest=True
     )
@@ -1741,3 +1744,11 @@ def create_path_to_sar_file(row):
     s = s.split("_")[5][:4]
     sar_filepath = f"/projects/fluxsar/data/Sentinel1/WV/{s}/{row['renamed_filename']}"
     return sar_filepath    
+
+def get_mean(d):
+    return d['mean']
+
+def clean_stats(lst):
+    for v in lst:
+        if v is not None:
+            return v
