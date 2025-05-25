@@ -74,7 +74,7 @@ def process_radial_wind(record):
                 'b0': result['b0'],
                 'b1': result['b1'],
                 'b2': result['b2'],
-                'wind_field_median': result['wind_field_mean']
+                'wind_field_median': result['wind_field_median']
             }
         return None
     except Exception as e:
