@@ -320,7 +320,7 @@ def cmod5n_inverse_enhanced(sigma0_obs, phi, incidence, B3, iterations=10):
 
     for iterno in range(1, iterations):
         # print iterno
-        sigma0_calc = cmod5n_forward(V, phi, incidence, B3)
+        sigma0_calc = cmod5n_forward_enhanced(V, phi, incidence, B3)
     
         ind = sigma0_calc - sigma0_obs > 0
         
