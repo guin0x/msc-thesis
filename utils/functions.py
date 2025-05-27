@@ -910,27 +910,38 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         pixel_size = 100
         k_values_wind = distances * (1.0 / (pixel_size * max(psd_wind.shape)))
 
-        # After computing radial_wind_psd and k_values_wind:
-        B3 = compute_B3(
-            k_values=np.array(k_values_wind), 
-            radial_psd=np.array(radial_wind_psd),
-            incidence_angle=np.nanmedian(incidence)  # Representative incidence angle
-        )
+        sigma_model, _, _, _ = cmod5n_forward(wind_field, phi, incidence)
 
-        # Then in your enhanced inversion:
-        wind_field_enhanced = cmod5n_inverse_enhanced(
-            sigma_sar, phi, incidence, B3=B3
-        )
+        residual = sigma_sar - sigma_model
+
+        fft_resid = np.fft.fftshift(np.fft.fft2(residual))
+        psd_resid = np.abs(fft_resid)**2
+
+        _, radial_resid_psd = radial_profile(psd_resid)
+
+
+        # # After computing radial_wind_psd and k_values_wind:
+        # B3 = compute_B3(
+        #     k_values=np.array(k_values_wind), 
+        #     radial_psd=np.array(radial_wind_psd),
+        #     incidence_angle=np.nanmedian(incidence)  # Representative incidence angle
+        # )
+
+        # # Then in your enhanced inversion:
+        # wind_field_enhanced = cmod5n_inverse_enhanced(
+        #     sigma_sar, phi, incidence, B3=B3
+        # )
 
         return {
             'sar_filepath': sar_filepath,
             'radial_wind_psd': radial_wind_psd.tolist(),  # Convert to regular Python list
+            'radial_residual_psd': radial_resid_psd.tolist(),  # Convert to regular Python list
             'k_values_wind': k_values_wind.tolist(),      # Convert to regular Python list
             'b0': b0_stats,  # Already JSON-serializable
             'b1': b1_stats,  # Already JSON-serializable
             'b2': b2_stats,  # Already JSON-serializable
             'wind_field_median': wind_field_median,
-            'wind_field_enhanced_median': np.nanmedian(wind_field_enhanced)
+            # 'wind_field_enhanced_median': np.nanmedian(wind_field_enhanced)
         }
     
     except Exception as e:
@@ -1808,11 +1819,6 @@ def clean_stats(lst):
     for v in lst:
         if v is not None:
             return v
-        
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 def analyze_wind_bias(df, lbl, true_col='era5_wspd', retrieved_col='wind_field_median', 
                      group_col='phi_bins', show_plots=True, figsize=(15, 10)):
@@ -1940,3 +1946,75 @@ def analyze_wind_bias(df, lbl, true_col='era5_wspd', retrieved_col='wind_field_m
     print("• Relative Bias %: Bias as percentage of true mean value")
     
     return final_stats
+
+def analyze_b_parameter_vs_psd(b_param_ratio, psd_ratio, k_values, param_name, plot=False):
+    """
+    Analyze correlation between B-parameter ratio and PSD ratio across wavelengths.
+    
+    Parameters:
+    -----------
+    b_param_ratio : array-like
+        Ratio of B-parameter (WV1/WV2) for each phi bin
+    psd_ratio : DataFrame or array-like
+        PSD ratios for each phi bin (rows) and wavelength (columns)
+    k_values : array-like
+        Wavenumber values
+    param_name : str
+        Name of the B-parameter for plotting (e.g., 'B0', 'B1', 'B2')
+    """
+    correlations = []
+    wavelengths = 1/k_values
+    
+    for i in range(len(wavelengths)):
+        psd_at_wavelength = [psd_ratio.iloc[j][i] for j in range(len(psd_ratio))]
+        corr = np.corrcoef(b_param_ratio, psd_at_wavelength)[0,1]
+        correlations.append(corr)
+    if plot:
+        plt.figure(figsize=(10, 6))
+        plt.semilogx(wavelengths, correlations)
+        plt.axhline(y=0, color='black', linestyle='--', alpha=0.5)
+        plt.xlabel('Wavelength [m]')
+        plt.ylabel(f'Correlation({param_name}_ratio, PSD_ratio)')
+        plt.title(f'{param_name} vs PSD Correlation Across Scales')
+        plt.grid(True, alpha=0.3)
+    
+    return correlations, wavelengths
+
+def analyze_b_parameter_vs_psd_bootstrap(b_param_values, psd_values, k_values, param_name, plot=False, n_boot=1000):
+    """
+    Analyze correlation between B-parameter and PSD across wavelengths with bootstrap CIs.
+    """
+    b_param_values = np.array(b_param_values.values)
+    psd_values = np.array(psd_values.values)
+    correlations = []
+    lower_ci = []
+    upper_ci = []
+    wavelengths = 1 / k_values
+
+    for i in range(len(k_values)):
+        psd_at_k = [psd_values[j][i] for j in range(len(psd_values))]
+        psd_at_k = np.array(psd_at_k, dtype=float)
+        corr = np.corrcoef(b_param_values, psd_at_k)[0, 1]
+        correlations.append(corr)
+
+        # Bootstrap
+        boot_corrs = []
+        for _ in range(n_boot):
+            idx = np.random.choice(len(b_param_values), len(b_param_values), replace=True)
+            boot_corrs.append(np.corrcoef(b_param_values[idx], psd_at_k[idx])[0, 1])
+        ci_bounds = np.percentile(boot_corrs, [5, 95])
+        lower_ci.append(ci_bounds[0])
+        upper_ci.append(ci_bounds[1])
+
+    if plot:
+        plt.figure(figsize=(10, 6))
+        plt.plot(wavelengths, correlations, label=f'{param_name} vs PSD', linewidth=2)
+        plt.fill_between(wavelengths, lower_ci, upper_ci, alpha=0.3)
+        plt.axhline(0, color='black', linestyle='--', alpha=0.5)
+        plt.xlabel('Wavelength [m]')
+        plt.ylabel(f'Correlation({param_name}, PSD)')
+        plt.title(f'{param_name} vs PSD Correlation Across Scales')
+        plt.grid(True, alpha=0.3)
+        plt.legend()
+
+    return correlations, lower_ci, upper_ci, wavelengths
