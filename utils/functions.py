@@ -989,7 +989,7 @@ def compute_B3(k_values, radial_psd, incidence_angle):
 def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidence=0.95, 
                                figsize=(12, 8), x_range=None, y_range=None, 
                                use_log_scale=True, wavelength=False,
-                               bootstrap=True, ax=None):
+                               bootstrap=True, ax=None, column_name=None):
     """
     Creates a scientific publication-quality plot of average spectral density with confidence intervals.
     
@@ -1060,12 +1060,17 @@ def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidenc
     alpha = 1 - confidence
     
     for i, (df, title) in enumerate(zip(df_list, title_list)):
-        if "Wind" in title:
-            column_name = 'radial_wind_psd_padded'
-        elif "Sigma" in title:
-            column_name = 'radial_psd_padded'
+
+        if column_name is None:
+            if "Wind" in title:
+                column_name = 'radial_wind_psd_padded'
+            elif "Sigma" in title:
+                column_name = 'radial_psd_padded'
+            else:
+                column_name = 'radial_psd_padded'  
         else:
-            column_name = 'radial_psd_padded'  
+            column_name = column_name
+
         
         try:
             if column_name not in df.columns:
@@ -1914,7 +1919,7 @@ def analyze_wind_bias(df, lbl, true_col='era5_wspd', retrieved_col='wind_field_m
         axes[1,0].set_xlabel(f'{true_col} (m/s)')
         axes[1,0].set_ylabel(f'{retrieved_col} (m/s)')
         axes[1,0].set_title(f'{true_col} vs {retrieved_col} by {group_col}')
-        axes[1,0].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        # axes[1,0].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
         axes[1,0].grid(True, alpha=0.3)
         
         # 4. RMSE and MAE by group
@@ -1927,7 +1932,7 @@ def analyze_wind_bias(df, lbl, true_col='era5_wspd', retrieved_col='wind_field_m
         axes[1,1].set_title(f'RMSE and MAE by {group_col}')
         axes[1,1].set_xlabel(group_col)
         axes[1,1].set_ylabel('Error (m/s)')
-        axes[1,1].legend()
+        # axes[1,1].legend()
         axes[1,1].grid(True, alpha=0.3)
         axes[1,1].tick_params(axis='x', rotation=45)
         
