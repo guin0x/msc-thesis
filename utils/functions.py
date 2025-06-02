@@ -10,6 +10,7 @@ import matplotlib as mpl
 from matplotlib.ticker import LogLocator
 from tqdm import tqdm
 import json
+from sklearn.metrics import root_mean_squared_error
 
 def read_sar_data(filepath):
     """Read SAR data from a given filepath."""
@@ -919,6 +920,10 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
 
         _, radial_resid_psd = radial_profile(psd_resid)
 
+        wind_field_residual = wind_field - era5_wspd
+
+        wind_field_residual_psd, _, _ = process_wind_field(wind_field_residual)
+
 
         # # After computing radial_wind_psd and k_values_wind:
         # B3 = compute_B3(
@@ -936,6 +941,7 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'sar_filepath': sar_filepath,
             'radial_wind_psd': radial_wind_psd.tolist(),  # Convert to regular Python list
             'radial_residual_psd': radial_resid_psd.tolist(),  # Convert to regular Python list
+            'radial_wind_field_residual_psd': wind_field_residual_psd.tolist(),
             'k_values_wind': k_values_wind.tolist(),      # Convert to regular Python list
             'b0': b0_stats,  # Already JSON-serializable
             'b1': b1_stats,  # Already JSON-serializable
@@ -1237,16 +1243,53 @@ def get_k_values(df, column_name):
     
     return k_values
 
+def bad_or_good_retrieval(row, median):
+    if row < median:
+        return "good"
+    return "bad"
+
 def create_phi_bins_columns(df, col, v=1):
+    # Create bins centered around 0
+    # For v=10: [..., -25, -15, -5, 5, 15, 25, ...]
+    # This gives bins: [..., [-25,-15), [-15,-5), [-5,5), [5,15), [15,25), ...]
+    
+    # Start from -v/2 and go in both directions
+    half_v = v / 2
+    
+    # Calculate how many bins we need on each side to cover [-180, 180]
+    max_bins = int(180 / v) + 2  # +2 to ensure we cover the full range
+    
+    # Create bin edges centered around 0
+    bin_edges = []
+    
+    # Add the center edge
+    bin_edges.append(-half_v)
+    bin_edges.append(half_v)
+    
+    # Add negative bins (going backwards from -half_v)
+    for i in range(1, max_bins):
+        bin_edges.insert(0, -half_v - i * v)
+    
+    # Add positive bins (going forwards from half_v)
+    for i in range(1, max_bins):
+        bin_edges.append(half_v + i * v)
+    
+    # Sort and remove duplicates
+    bin_edges = sorted(set(bin_edges))
+    
+    # Make sure we cover the full range [-180, 180]
+    while min(bin_edges) > -180:
+        bin_edges.insert(0, min(bin_edges) - v)
+    while max(bin_edges) < 180:
+        bin_edges.append(max(bin_edges) + v)
+    
     df['phi_bins'] = pd.cut(
-    df[col], 
-    bins=np.arange(-180, 181, v),
-    right=False, 
-    include_lowest=True
+        df[col],
+        bins=bin_edges,
+        right=False,
+        include_lowest=True
     )
-
     df["phi_bins"] = df["phi_bins"].astype(str)
-
     return df
 
 def create_dfs_from_phi_interval(phi_bin, df_complete, df_results_updated, df_results_wind):
@@ -1825,7 +1868,7 @@ def clean_stats(lst):
         if v is not None:
             return v
 
-def analyze_wind_bias(df, lbl, true_col='era5_wspd', retrieved_col='wind_field_median', 
+def analyze_wind_bias(df, lbl, true_col='wspd', retrieved_col='wind_field_median', 
                      group_col='phi_bins', show_plots=True, figsize=(15, 10)):
     """
     Analyze bias between retrieved and true wind field data by grouping variable.
@@ -2023,3 +2066,308 @@ def analyze_b_parameter_vs_psd_bootstrap(b_param_values, psd_values, k_values, p
         plt.legend()
 
     return correlations, lower_ci, upper_ci, wavelengths
+
+
+def plot_b_coeff_correlations(
+    wavelengths,
+    b0_correlations, b0_ci_lower=None, b0_ci_upper=None,
+    b1_correlations=None, b1_ci_lower=None, b1_ci_upper=None,
+    b2_correlations=None, b2_ci_lower=None, b2_ci_upper=None,
+    use_semilogx=True
+):
+    fig, ax = plt.subplots(figsize=(14, 9))
+    plot_func = ax.semilogx if use_semilogx else ax.plot
+
+    # Plot B0
+    plot_func(wavelengths, b0_correlations, 'r-.', label='B0 wrt PSD_wind', linewidth=2.5)
+    if b0_ci_lower is not None and b0_ci_upper is not None:
+        ax.fill_between(wavelengths, b0_ci_lower, b0_ci_upper, color='red', alpha=0.2)
+
+    # Plot B1
+    if b1_correlations is not None:
+        plot_func(wavelengths, b1_correlations, 'g-.', label='B1 wrt PSD_wind', linewidth=2.5)
+        if b1_ci_lower is not None and b1_ci_upper is not None:
+            ax.fill_between(wavelengths, b1_ci_lower, b1_ci_upper, color='green', alpha=0.2)
+
+    # Plot B2
+    if b2_correlations is not None:
+        plot_func(wavelengths, b2_correlations, 'b-.', label='B2 wrt PSD_wind', linewidth=2.5)
+        if b2_ci_lower is not None and b2_ci_upper is not None:
+            ax.fill_between(wavelengths, b2_ci_lower, b2_ci_upper, color='blue', alpha=0.2)
+
+    # Reference line
+    ax.axhline(y=0, color='black', linestyle='--', alpha=0.5, label='No correlation')
+
+    # Interpretation zones
+    # ax.axhspan(0.5, 1.0, alpha=0.1, color='red', label='Strong positive correlation')
+    # ax.axhspan(-1.0, -0.5, alpha=0.1, color='blue', label='Strong negative correlation')
+
+    # Labels and title
+    ax.set_xlabel('Wavelength [m]', fontsize=14)
+    ax.set_ylabel('Correlation coefficient', fontsize=14)
+    ax.set_xlim(200, 5000)
+    # ax.set_xticks([200, 1000, 2000, 5000, 10000, 20000])
+    N = 12
+    # N = len(b0_mean_ratio) if b0_mean_ratio is not None else "?"
+    title = ('Correlation between CMOD5n harmonic coefficients\n'
+             'and wind field spectral energy across different scales\n'
+             f'(B_ratio = B(23°)/B(36°), PSD_ratio = PSD_WV1/PSD_WV2, N={N} phi bins)\n'
+             '(wspd > 15m/s, L<0)')
+    ax.set_title(title, fontsize=12, pad=20)
+
+    # # Explanation text box
+    # textstr = ('Analysis approach:\n'
+    #            '• For each phi bin $\in$ np.arange(-180, 181, 30):\n'
+    #            '  - Compute B-parameter ratio between $\\theta$=23° and =36°\n'
+    #            '  - Compute PSD ratio between $\\theta$=23° and =36°\n'
+    #            '• At each wavelength:\n'
+    #            '  - Correlate B-ratios with PSD-ratios across all phi bins\n')
+    # props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    # ax.text(0.65, 0.70, textstr, transform=ax.transAxes, fontsize=10,
+    #         verticalalignment='top', bbox=props)
+
+    # Legend and grid
+    ax.legend(loc='lower right', fontsize=11, framealpha=0.9)
+    ax.grid(True, alpha=0.3, which='both')
+
+    # Key vertical lines
+    ax.axvline(x=100, color='gray', linestyle=':', alpha=0.5)
+    # ax.text(100, ax.get_ylim()[1]*0.9, '100m', ha='center', fontsize=10)
+    ax.axvline(x=1000, color='gray', linestyle=':', alpha=0.5)
+    ax.text(1000, ax.get_ylim()[1]*0.95, '1km', ha='center', fontsize=10)
+
+    plt.tight_layout()
+    plt.show()
+
+
+def bootstrap_median_ci(data, n_bootstrap=1000, confidence=0.95):
+    """
+    Calculate bootstrap confidence intervals for median
+    
+    Parameters:
+    data: 2D array (samples x wavelengths)
+    n_bootstrap: number of bootstrap samples
+    confidence: confidence level (0.95 for 95%)
+    
+    Returns:
+    median, lower_ci, upper_ci (all arrays of length = n_wavelengths)
+    """
+    n_samples, n_wavelengths = data.shape
+    
+    medians = []
+    
+    # Bootstrap sampling
+    for _ in range(n_bootstrap):
+        # Resample with replacement
+        bootstrap_indices = np.random.choice(n_samples, size=n_samples, replace=True)
+        bootstrap_sample = data[bootstrap_indices]
+        
+        # Calculate median for each wavelength
+        bootstrap_median = np.median(bootstrap_sample, axis=0)
+        medians.append(bootstrap_median)
+    
+    medians = np.array(medians)
+    
+    # Calculate confidence intervals
+    alpha = 1 - confidence
+    lower_percentile = (alpha/2) * 100
+    upper_percentile = (1 - alpha/2) * 100
+    
+    median = np.median(data, axis=0)
+    lower_ci = np.percentile(medians, lower_percentile, axis=0)
+    upper_ci = np.percentile(medians, upper_percentile, axis=0)
+    
+    return median, lower_ci, upper_ci
+
+def extract_first_number(phi_range):
+        import re
+        match = re.search(r'\[(-?\d+(?:\.\d+)?)', phi_range)
+        return float(match.group(1)) if match else 0
+
+def plot_radial_psd_diff_combined(df, wavelengths, 
+                                  col, d, q, 
+                                  yrange = None,
+                                  linear_yaxis=False, 
+                                  plot_conf_interval=False, 
+                                  save_image=True):
+    """
+    Plot Good/Bad PSD ratio across phi bins divided into 4 quadrants.
+    Parameters:
+    - df1: DataFrame with PSD column, 'phi_bins', and 'nrcs_retrieval'
+    - wavelengths: array of wavelength values
+    - col: column name containing PSD arrays
+    - linear_yaxis: if True, use linear scale; otherwise, use log scale
+    """
+    q = int(q*100)
+
+    wv_type = df.wm_type.unique()[0]
+    df1_good = df[df['nrcs_retrieval'] == 'good']
+    df1_bad = df[df['nrcs_retrieval'] == 'bad']
+    phi_bins = sorted(df['phi_bins'].unique(), key=extract_first_number)
+    
+    # Redefine quadrants to work with centered bins
+    # Now quadrants are centered around the cardinal directions
+    quadrants = [(-135, -45), (-45, 45), (45, 135), (135, 225)]  # 225 wraps to -135
+    quadrant_labels = ['-135° to -45°', '-45° to 45°', '45° to 135°', '135° to -135°']
+    
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    axes = axes.flatten()
+    
+    for q_idx, ((q_min, q_max), q_label) in enumerate(zip(quadrants, quadrant_labels)):
+        ax = axes[q_idx]
+        
+        # Handle the wraparound case for Q2 (135° to -135°)
+        if q_max > 180:  # This is the wraparound quadrant
+            q_bins = [phi for phi in phi_bins if 
+                     (extract_first_number(phi) >= q_min) or 
+                     (extract_first_number(phi) < q_max - 360)]
+        else:
+            q_bins = [phi for phi in phi_bins if q_min <= extract_first_number(phi) < q_max]
+        
+        colors = plt.cm.viridis(np.linspace(0, 1, len(q_bins)))
+        
+        for i, phi_bin in enumerate(q_bins):
+            good_phi = df1_good[df1_good['phi_bins'] == phi_bin]
+            bad_phi = df1_bad[df1_bad['phi_bins'] == phi_bin]
+            n_good = len(good_phi)
+            n_bad = len(bad_phi)
+            
+            if len(good_phi) > 10 and len(bad_phi) > 10:
+                good_arrays = np.stack(good_phi[col].values)
+                bad_arrays = np.stack(bad_phi[col].values)
+                
+                good_median, good_lower, good_upper = bootstrap_median_ci(good_arrays)
+                bad_median, bad_lower, bad_upper = bootstrap_median_ci(bad_arrays)
+                
+                diff = good_median / bad_median
+                ax.plot(wavelengths, diff, color=colors[i], 
+                       label=f'{phi_bin}|n={n_good}/{n_bad}|RMSE={d[phi_bin]}m/s', linewidth=2)
+                
+                if plot_conf_interval:
+                    good_rel_lower = good_lower / good_median
+                    good_rel_upper = good_upper / good_median
+                    bad_rel_lower = bad_lower / bad_median
+                    bad_rel_upper = bad_upper / bad_median
+                   
+                    diff_lower = diff * good_rel_lower * (1/bad_rel_upper)
+                    diff_upper = diff * good_rel_upper * (1/bad_rel_lower)
+                   
+                    ax.fill_between(wavelengths, diff_lower, diff_upper, color=colors[i], alpha=0.3)
+        
+        ax.set_title(q_label, fontsize=11)
+        ax.set_xlabel('$\lambda$ [m]', fontsize=10)
+        ax.set_ylabel('Good/Bad PSD', fontsize=10)
+        ax.grid(True, alpha=0.3)
+        ax.set_xlim(200, None)
+        ax.set_xticks([200, 2000, 5000, 10000, 15000, 20000])
+        
+        if not linear_yaxis:
+            ax.set_yscale('log')
+
+        if yrange:
+            ax.set_ylim(yrange)
+        ax.legend(fontsize=8)
+    
+    plt.suptitle(f"{wv_type}-{col}")
+    plt.tight_layout()
+    print(f"q{q}-{wv_type}-{col}")
+    if save_image:
+            plt.savefig(f"../images/good_bad_classification/q{q}-{wv_type}-{col}")
+            plt.close()
+
+def split_bad_cluster_with_slope(df_phi, slope=0.5, intercept=0.0):
+    """
+    Split points based on a line with given slope and intercept.
+    Points below the line: y < slope*x + intercept are 'bad'
+    Points above the line: y >= slope*x + intercept are 'good'
+    
+    Parameters:
+    slope: slope of the dividing line (default 0.5)
+    intercept: y-intercept of the dividing line (default 0.0)
+    """
+    x = df_phi['sigma_cmod_median']
+    y = df_phi['sigma_sar_median']
+    
+    # Calculate the line: y = slope * x + intercept
+    line_y = slope * x + intercept
+    
+    # Points below the line are 'bad', above are 'good'
+    df_phi['nrcs_retrieval'] = ['bad' if y_val < line_val else 'good' 
+                            for y_val, line_val in zip(y, line_y)]
+    return df_phi
+
+def plot_division_line(ax, slope=0.5, intercept=0.0, x_range=(0, 1)):
+    """
+    Plot the division line on the given axis
+    """
+    x_line = np.linspace(x_range[0], x_range[1], 100)
+    y_line = slope * x_line + intercept
+    ax.plot(x_line, y_line, color='blue', linestyle='--', linewidth=2, 
+            label=f'Division line: y = {slope}x + {intercept}')
+    return ax
+
+def plot_retrieval_quality_per_q(q, df1):
+
+    phi_bins = sorted(df1['phi_bins'].unique(), key=extract_first_number)
+    fig, axs = plt.subplots(len(phi_bins), 2, figsize=(12, 5 * len(phi_bins)))
+
+    wv_type = df1.wm_type.unique()[0]
+    fig.suptitle(f"q{int(q*100)}-{wv_type}", fontsize=16)
+    d1 = {}
+
+    for i, phi in enumerate(phi_bins):
+        df_phi = df1[df1['phi_bins'] == phi].copy()
+        # df_phi = split_bad_cluster_with_slope(df_phi, slope=SLOPE, intercept=INTERCEPT)
+        is_cmod = df_phi['nrcs_retrieval'] == 'good'
+        n = len(df_phi)
+        y_true = df_phi['sigma_cmod_median']
+        y_pred = df_phi['sigma_sar_median']
+        rmse = root_mean_squared_error(y_true, y_pred)
+        
+        # NRCS plot
+        axs[i, 0].scatter(df_phi.loc[is_cmod, 'sigma_cmod_median'], 
+                        df_phi.loc[is_cmod, 'sigma_sar_median'], 
+                        color='blue', label=f"good {(len(df_phi.loc[is_cmod, 'sigma_cmod_median']))}")
+        axs[i, 0].scatter(df_phi.loc[~is_cmod, 'sigma_cmod_median'], 
+                        df_phi.loc[~is_cmod, 'sigma_sar_median'], 
+                        color='orange', label=f"bad {(len(df_phi.loc[~is_cmod, 'sigma_cmod_median']))}")
+        
+        # Plot the 1:1 line
+        axs[i, 0].plot(np.linspace(0, 1, 100), np.linspace(0, 1, 100), color='gray')
+        
+        
+        axs[i, 0].set_xlim(0, None)
+        axs[i, 0].set_ylim(0, 1)
+        axs[i, 0].set_xlabel("CMOD median NRCS")
+        axs[i, 0].set_ylabel("SAR median NRCS")
+        axs[i, 0].set_title(f"{phi} - NRCS; RMSE = {rmse:.2f} dB?; n = {n}")
+        axs[i, 0].legend(loc='upper left', fontsize=8)
+        
+        # Wind plot (unchanged)
+        y_true = df_phi['era5_wspd']
+        y_pred = df_phi['wind_field_median']
+        rmse = root_mean_squared_error(y_true, y_pred)
+        d1[phi] = round(rmse, 2)
+        
+        axs[i, 1].scatter(df_phi.loc[is_cmod, 'era5_wspd'], 
+                        df_phi.loc[is_cmod, 'wind_field_median'], 
+                        color='blue', label='good')
+        axs[i, 1].scatter(df_phi.loc[~is_cmod, 'era5_wspd'], 
+                        df_phi.loc[~is_cmod, 'wind_field_median'], 
+                        color='orange', label='bad')
+        
+        axs[i, 1].plot(np.linspace(0, 30, 100), np.linspace(0, 30, 100), color='gray')
+        axs[i, 1].set_xlim(0, None)
+        axs[i, 1].set_ylim(0, None)
+        axs[i, 1].set_xlabel("ERA5 wind (m/s)")
+        axs[i, 1].set_ylabel("CMOD wind (m/s)")
+        axs[i, 1].set_title(f"{phi} - Wind; RMSE = {rmse:.2f} m/s; n = {n}")
+        axs[i, 1].legend(loc='upper left', fontsize=8)
+
+        df1.loc[df1['phi_bins'] == phi, 'nrcs_retrieval'] = df_phi['nrcs_retrieval']
+
+    plt.tight_layout(rect=[0, 0, 1, 0.97])
+    plt.savefig(f"../images/good_bad_classification/q{int(q*100)}-{wv_type}.png")
+    plt.close(fig)
+
+    return d1
