@@ -1,6 +1,7 @@
 /dataframes_w_chen_classes
 /SAR_data
 /processed_data
+/unprocessed_data/
 /results*/
 __pycache__/
 *.py[cod]
