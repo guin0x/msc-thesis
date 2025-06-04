@@ -308,3 +308,87 @@ This paper **supports** your interpretation:
 * Resulting wind inversions can show **scale-specific distortions**, which appear in PSD correlations (like your 1 km bump in $B_0$).
 
 It doesn't explicitly analyze correlation with spectral power, but the **physical reasoning aligns 100%**.
+
+
+This is actually a very logical and expected result that reveals something fundamental about how GMF errors propagate! Let me explain why this apparent contradiction makes perfect sense.
+
+## Why Sigma0 Residual Errors Grow with Wavelength
+
+The increasing residual PSD ratios with wavelength are expected because:
+
+1. **ERA5 Smoothing**: ERA5 winds are inherently smoother than reality at mesoscales
+   - ERA5 resolution (~30km) misses mesoscale variability (5-50km)
+   - Real winds have more large-scale structure than ERA5 captures
+   - So σ₀_CMOD (from smooth ERA5) lacks this variability
+
+2. **Missing Physics**: CMOD5N doesn't account for large-scale modulations from:
+   - Swell systems
+   - Atmospheric boundary layer rolls
+   - Sea state variations
+   - These effects accumulate at larger scales
+
+## Why Wind Retrieval Errors Can Decrease with Wavelength
+
+This is the fascinating part! The wind PSD ratios showing different behavior occurs because:
+
+### 1. **Nonlinear Filtering Effect**
+The GMF inverse acts as a nonlinear filter that has scale-dependent properties:
+- At **small scales**: The GMF is highly nonlinear (especially near low/high winds)
+  - Small σ₀ variations → large wind variations
+  - Errors are amplified by the nonlinearity
+  
+- At **large scales**: The GMF becomes more linear
+  - The relationship is more stable
+  - Errors propagate more predictably
+
+### 2. **Dynamic Range Compression**
+The GMF has a limited dynamic range:
+```
+σ₀ ∈ [-25dB, 0dB] maps to U ∈ [0, 25 m/s]
+```
+This means:
+- Large σ₀ variations at large scales get "compressed" when inverted to wind
+- The logarithmic nature of σ₀ vs linear wind speed creates this compression
+
+### 3. **Error Cancellation**
+At large scales, systematic biases in the GMF can partially cancel:
+- Overestimation in one region compensates underestimation in another
+- This averaging effect is more pronounced at larger scales
+
+## Mathematical Interpretation
+
+Consider the error propagation:
+
+For sigma0 residuals:
+```
+Δσ₀ = σ₀_SAR - σ₀_CMOD
+```
+This directly shows missing variability, growing with scale.
+
+For wind retrieval:
+```
+U_retrieved = F⁻¹(σ₀_SAR)
+U_true = G⁻¹(σ₀_SAR)
+ΔU = U_retrieved - U_true
+```
+
+The key is that F⁻¹ (CMOD inverse) has different sensitivity at different scales:
+- **Small scales**: ∂U/∂σ₀ is large → error amplification
+- **Large scales**: ∂U/∂σ₀ is smaller → error reduction
+
+## Physical Interpretation
+
+This pattern suggests that:
+
+1. **CMOD5N is "accidentally" better at large-scale wind retrieval** despite missing large-scale physics in the forward model
+2. The **compensation mechanism** works because:
+   - Natural wind variability at large scales is somewhat bounded
+   - The GMF inverse naturally smooths extreme values
+   - Statistical relationships hold better at larger scales
+
+3. **The real problem is at intermediate scales (1-10km)** where:
+   - Nonlinearity is strong
+   - Physical processes are complex
+   - Neither averaging nor linearization helps
+
+This is why your analysis is so valuable - it shows that simply adding scale-dependent terms to the GMF isn't enough. We need to understand how errors propagate through both the forward and inverse transformations at different scales.

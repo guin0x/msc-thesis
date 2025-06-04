@@ -11,6 +11,7 @@ from matplotlib.ticker import LogLocator
 from tqdm import tqdm
 import json
 from sklearn.metrics import root_mean_squared_error
+from matplotlib.patches import Arrow
 
 def read_sar_data(filepath):
     """Read SAR data from a given filepath."""
@@ -847,6 +848,7 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             return None
         
         sigma_sar = sar_ds.sigma0.values
+
         incidence = sar_ds.incidence.values
         ground_heading = sar_ds.ground_heading.values
         
@@ -914,6 +916,7 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         sigma_model, _, _, _ = cmod5n_forward(wind_field, phi, incidence)
 
         residual = sigma_sar - sigma_model
+        residual_minus_mean = residual - np.mean(residual)
 
         fft_resid = np.fft.fftshift(np.fft.fft2(residual))
         psd_resid = np.abs(fft_resid)**2
@@ -923,19 +926,6 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         wind_field_residual = wind_field - era5_wspd
 
         wind_field_residual_psd, _, _ = process_wind_field(wind_field_residual)
-
-
-        # # After computing radial_wind_psd and k_values_wind:
-        # B3 = compute_B3(
-        #     k_values=np.array(k_values_wind), 
-        #     radial_psd=np.array(radial_wind_psd),
-        #     incidence_angle=np.nanmedian(incidence)  # Representative incidence angle
-        # )
-
-        # # Then in your enhanced inversion:
-        # wind_field_enhanced = cmod5n_inverse_enhanced(
-        #     sigma_sar, phi, incidence, B3=B3
-        # )
 
         return {
             'sar_filepath': sar_filepath,
@@ -947,6 +937,8 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'b1': b1_stats,  # Already JSON-serializable
             'b2': b2_stats,  # Already JSON-serializable
             'wind_field_median': wind_field_median,
+            'residual_median': np.median(residual).tolist(),
+            'residual_minus_mean_median': np.median(residual_minus_mean).tolist()
             # 'wind_field_enhanced_median': np.nanmedian(wind_field_enhanced)
         }
     
@@ -2371,3 +2363,54 @@ def plot_retrieval_quality_per_q(q, df1):
     plt.close(fig)
 
     return d1
+
+def plot_psd(psd_2d, wavelength, ground_heading, wdir, title="2D Power Spectral Density"):
+    """Plot the 2D Power Spectral Density with a north arrow and proper wavelength scaling.
+   
+    Args:
+        psd_2d: The PSD 2D array (fftshifted so center is in the middle)
+        wavelength: Wavelength array for both x and y axes (assumes square grid)
+        ground_heading: Ground heading in degrees (-180 to 180)
+        wdir: Wind direction in degrees
+        title: Plot title
+    """
+    _, ax = plt.subplots(figsize=(10, 8))
+    
+    # Create extent for proper axis scaling
+    # Since PSD is fftshifted, wavelength should go from negative to positive
+    extent = [wavelength[0], wavelength[-1], wavelength[0], wavelength[-1]]
+    
+    im = ax.imshow(np.log(psd_2d), cmap='gray', aspect='auto', extent=extent, origin='lower')
+    plt.colorbar(im, label='Log Power Spectral Density')
+    ax.set_title(title)
+    ax.set_xlabel('kx [1/m]')
+    ax.set_ylabel('ky [1/m]')
+   
+    # Center coordinates in data space (should be 0,0 for fftshifted data)
+    center_x = 0
+    center_y = 0
+    
+    # Arrow length in data coordinates
+    wavelength_range = wavelength[-1] - wavelength[0]
+    arrow_length = wavelength_range * 0.15
+   
+    # North arrow
+    north_angle = np.radians(90 - ground_heading)
+    dx = arrow_length * np.cos(north_angle)
+    dy = arrow_length * np.sin(north_angle)
+   
+    arrow = Arrow(center_x, center_y, dx, dy, width=arrow_length*0.3, color='red')
+    ax.add_patch(arrow)
+    ax.text(center_x + dx * 1.2, center_y + dy * 1.2, 'N', color='red', fontsize=12, fontweight='bold', ha='center')
+    
+    # Wind arrow
+    wind_angle = np.radians(-wdir)
+    wind_dx = arrow_length * 0.5 * np.cos(wind_angle)
+    wind_dy = arrow_length * 0.5 * np.sin(wind_angle)
+    
+    wind_arrow = Arrow(center_x, center_y, wind_dx, wind_dy, width=arrow_length*0.3, color='blue')
+    ax.add_patch(wind_arrow)
+    # Fixed the bug: was using center_x instead of center_y
+    ax.text(center_x + wind_dx * 1.2, center_y + wind_dy * 1.2, 'W', color='blue', fontsize=12, fontweight='bold', ha='center')
+   
+    plt.show()
