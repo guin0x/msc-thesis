@@ -78,7 +78,8 @@ def process_radial_wind(record):
                 'b2': result['b2'],
                 'wind_field_median': result['wind_field_median'],
                 'residual_median': result['residual_median'],
-                'residual_minus_mean_median':result['residual_minus_mean_median']
+                'residual_minus_mean_median': result['residual_minus_mean_median'],
+                'radial_sigma_sar_psd': result['radial_sigma_sar_psd']
                 # 'wind_field_enhanced_median': result['wind_field_enhanced_median']
             }
         return None

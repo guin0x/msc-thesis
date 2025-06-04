@@ -927,6 +927,10 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
 
         wind_field_residual_psd, _, _ = process_wind_field(wind_field_residual)
 
+        fft_sigma_sar = np.fft.fftshift(np.fft.fft2(sigma_sar))
+        sigma_sar_psd = np.abs(fft_sigma_sar)**2
+        radial_sigma_sar_psd = radial_profile(sigma_sar_psd)
+
         return {
             'sar_filepath': sar_filepath,
             'radial_wind_psd': radial_wind_psd.tolist(),  # Convert to regular Python list
@@ -938,7 +942,8 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'b2': b2_stats,  # Already JSON-serializable
             'wind_field_median': wind_field_median,
             'residual_median': np.median(residual).tolist(),
-            'residual_minus_mean_median': np.median(residual_minus_mean).tolist()
+            'residual_minus_mean_median': np.median(residual_minus_mean).tolist(),
+            'radial_sigma_sar_psd': radial_sigma_sar_psd.tolist()
             # 'wind_field_enhanced_median': np.nanmedian(wind_field_enhanced)
         }
     
@@ -2247,7 +2252,7 @@ def plot_radial_psd_diff_combined(df, wavelengths,
                     ax.fill_between(wavelengths, diff_lower, diff_upper, color=colors[i], alpha=0.3)
         
         ax.set_title(q_label, fontsize=11)
-        ax.set_xlabel('$\lambda$ [m]', fontsize=10)
+        ax.set_xlabel('$\\lambda$ [m]', fontsize=10)
         ax.set_ylabel('Good/Bad PSD', fontsize=10)
         ax.grid(True, alpha=0.3)
         ax.set_xlim(200, None)
