@@ -71,6 +71,7 @@ def process_radial_wind(record):
                 'sar_filepath': record['sar_filepath'],
                 'radial_wind_psd': result['radial_wind_psd'],
                 'radial_residual_psd': result['radial_residual_psd'],  # Convert to regular Python list
+                'radial_residual_psd_improved': result['radial_residual_psd_improved'],
                 'radial_wind_field_residual_psd': result['radial_wind_field_residual_psd'],
                 'k_values_wind': result['k_values_wind'],
                 'b0': result['b0'],

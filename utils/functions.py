@@ -931,10 +931,22 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         sigma_sar_psd = np.abs(fft_sigma_sar)**2
         radial_sigma_sar_psd = radial_profile(sigma_sar_psd)
 
+        sigma_cmod_improved = scale_selective_filter(sigma_sar, sigma_model, np.median(wind_field))
+
+        residual_improved = sigma_sar - sigma_cmod_improved
+        
+        fft_resid_impr = np.fft.fftshift(np.fft.fft2(residual_improved))
+
+        psd_resid_impr = np.abs(fft_resid_impr)**2
+
+        _, radial_resid_psd_impr = radial_profile(psd_resid_impr)
+
+
         return {
             'sar_filepath': sar_filepath,
             'radial_wind_psd': radial_wind_psd.tolist(),  # Convert to regular Python list
             'radial_residual_psd': radial_resid_psd.tolist(),  # Convert to regular Python list
+            'radial_residual_psd_improved': radial_resid_psd_impr.tolist(),
             'radial_wind_field_residual_psd': wind_field_residual_psd.tolist(),
             'k_values_wind': k_values_wind.tolist(),      # Convert to regular Python list
             'b0': b0_stats,  # Already JSON-serializable
@@ -2306,7 +2318,7 @@ def plot_division_line(ax, slope=0.5, intercept=0.0, x_range=(0, 1)):
 def plot_retrieval_quality_per_q(q, df1):
 
     phi_bins = sorted(df1['phi_bins'].unique(), key=extract_first_number)
-    fig, axs = plt.subplots(len(phi_bins), 2, figsize=(12, 5 * len(phi_bins)))
+    fig, axs = plt.subplots(len(phi_bins), 3, figsize=(12, 5 * len(phi_bins)))
 
     wv_type = df1.wm_type.unique()[0]
     fig.suptitle(f"q{int(q*100)}-{wv_type}", fontsize=16)
@@ -2362,6 +2374,14 @@ def plot_retrieval_quality_per_q(q, df1):
         axs[i, 1].legend(loc='upper left', fontsize=8)
 
         df1.loc[df1['phi_bins'] == phi, 'nrcs_retrieval'] = df_phi['nrcs_retrieval']
+
+        axs[i, 2].scatter(range(len(df_phi)), df_phi.residual_median)
+        axs[i, 2].set_ylim(-0.0005, 0.001)
+        axs[i, 2].axhline(q, ls='--', color='red')
+        axs[i, 2].set_xlabel("Observation")
+        axs[i, 2].set_ylabel("Residual (NRCS_sar - NRCS_cmod")
+        # axs[i, 2].set_title()
+        # axs[i, 2].legend(loc='upper left', fontsize=8)
 
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.savefig(f"../images/good_bad_classification/q{int(q*100)}-{wv_type}.png")
@@ -2419,3 +2439,25 @@ def plot_psd(psd_2d, wavelength, ground_heading, wdir, title="2D Power Spectral 
     ax.text(center_x + wind_dx * 1.2, center_y + wind_dy * 1.2, 'W', color='blue', fontsize=12, fontweight='bold', ha='center')
    
     plt.show()
+
+def scale_selective_filter(sigma_sar, sigma_cmod, wind_speed, pixel_size=10):
+    """Simple scale-dependent filtering"""
+    # Optimal scale based on wind speed (Zhang's insight)
+    optimal_scale = 200 + 20 * wind_speed  # meters, empirical
+    
+    # Get frequency grids
+    kx = np.fft.fftfreq(sigma_sar.shape[0], pixel_size)
+    ky = np.fft.fftfreq(sigma_sar.shape[1], pixel_size) 
+    KX, KY = np.meshgrid(kx, ky, indexing='ij')
+    K = np.sqrt(KX**2 + KY**2)  # magnitude
+    
+    # Gaussian filter centered on optimal scale
+    sigma_k = optimal_scale / 3  # filter width
+    H = np.exp(-((1/K - optimal_scale)**2) / (2*sigma_k**2))
+    H[0,0] = 1  # preserve DC
+    
+    # Apply filter
+    sigma_cmod_fft = np.fft.fftfreq(sigma_cmod)
+    sigma_cmod_filtered = np.fft.ifft2(sigma_cmod_fft * H).real
+    
+    return sigma_cmod_filtered
