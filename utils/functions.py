@@ -943,7 +943,7 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'wind_field_median': wind_field_median,
             'residual_median': np.median(residual).tolist(),
             'residual_minus_mean_median': np.median(residual_minus_mean).tolist(),
-            'radial_sigma_sar_psd': radial_sigma_sar_psd.tolist()
+            'radial_sigma_sar_psd': radial_sigma_sar_psd[1].tolist()
             # 'wind_field_enhanced_median': np.nanmedian(wind_field_enhanced)
         }
     
