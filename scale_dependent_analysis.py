@@ -80,8 +80,9 @@ def process_radial_wind(record):
                 'wind_field_median': result['wind_field_median'],
                 'residual_median': result['residual_median'],
                 'residual_minus_mean_median': result['residual_minus_mean_median'],
-                'radial_sigma_sar_psd': result['radial_sigma_sar_psd']
-                # 'wind_field_enhanced_median': result['wind_field_enhanced_median']
+                'radial_sigma_sar_psd': result['radial_sigma_sar_psd'],
+                'cmod_scale_sensitivity': 'cmod_scale_sensitivity',
+                'cmod_era5_scale_comparison': 'cmod_era5_scale_comparison'
             }
         return None
     except Exception as e:
