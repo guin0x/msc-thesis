@@ -941,6 +941,8 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
 
         _, radial_resid_psd_impr = radial_profile(psd_resid_impr)
 
+        cmod_noise_sensitivity = cmod_scale_sensitivity_analysis(sigma_sar, phi, incidence, wind_field)
+        cmod_era5_scales = cmod_era5_scale_comparison(sigma_sar, phi, incidence, era5_wspd)
 
         return {
             'sar_filepath': sar_filepath,
@@ -955,7 +957,9 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'wind_field_median': wind_field_median,
             'residual_median': np.median(residual).tolist(),
             'residual_minus_mean_median': np.median(residual_minus_mean).tolist(),
-            'radial_sigma_sar_psd': radial_sigma_sar_psd[1].tolist()
+            'radial_sigma_sar_psd': radial_sigma_sar_psd[1].tolist(),
+            'cmod_scale_sensitivity': cmod_noise_sensitivity,
+            'cmod_era5_scale_comparison': cmod_era5_scales,
             # 'wind_field_enhanced_median': np.nanmedian(wind_field_enhanced)
         }
     
@@ -2318,7 +2322,7 @@ def plot_division_line(ax, slope=0.5, intercept=0.0, x_range=(0, 1)):
 def plot_retrieval_quality_per_q(q, df1):
 
     phi_bins = sorted(df1['phi_bins'].unique(), key=extract_first_number)
-    fig, axs = plt.subplots(len(phi_bins), 3, figsize=(12, 5 * len(phi_bins)))
+    fig, axs = plt.subplots(len(phi_bins), 2, figsize=(12, 5 * len(phi_bins)))
 
     wv_type = df1.wm_type.unique()[0]
     fig.suptitle(f"q{int(q*100)}-{wv_type}", fontsize=16)
@@ -2328,58 +2332,40 @@ def plot_retrieval_quality_per_q(q, df1):
         df_phi = df1[df1['phi_bins'] == phi].copy()
         # df_phi = split_bad_cluster_with_slope(df_phi, slope=SLOPE, intercept=INTERCEPT)
         is_cmod = df_phi['nrcs_retrieval'] == 'good'
+
         n = len(df_phi)
+
+        n_good = len(df_phi.loc[is_cmod])
+        n_bad = len(df_phi.loc[~is_cmod])
+        
+
+        
         y_true = df_phi['sigma_cmod_median']
         y_pred = df_phi['sigma_sar_median']
         rmse = root_mean_squared_error(y_true, y_pred)
         
-        # NRCS plot
-        axs[i, 0].scatter(df_phi.loc[is_cmod, 'sigma_cmod_median'], 
-                        df_phi.loc[is_cmod, 'sigma_sar_median'], 
-                        color='blue', label=f"good {(len(df_phi.loc[is_cmod, 'sigma_cmod_median']))}")
-        axs[i, 0].scatter(df_phi.loc[~is_cmod, 'sigma_cmod_median'], 
-                        df_phi.loc[~is_cmod, 'sigma_sar_median'], 
-                        color='orange', label=f"bad {(len(df_phi.loc[~is_cmod, 'sigma_cmod_median']))}")
-        
-        # Plot the 1:1 line
-        axs[i, 0].plot(np.linspace(0, 1, 100), np.linspace(0, 1, 100), color='gray')
-        
-        
-        axs[i, 0].set_xlim(0, None)
-        axs[i, 0].set_ylim(0, 1)
-        axs[i, 0].set_xlabel("CMOD median NRCS")
-        axs[i, 0].set_ylabel("SAR median NRCS")
-        axs[i, 0].set_title(f"{phi} - NRCS; RMSE = {rmse:.2f} dB?; n = {n}")
-        axs[i, 0].legend(loc='upper left', fontsize=8)
-        
-        # Wind plot (unchanged)
-        y_true = df_phi['era5_wspd']
-        y_pred = df_phi['wind_field_median']
-        rmse = root_mean_squared_error(y_true, y_pred)
-        d1[phi] = round(rmse, 2)
-        
-        axs[i, 1].scatter(df_phi.loc[is_cmod, 'era5_wspd'], 
+        axs[i, 0].scatter(df_phi.loc[is_cmod, 'era5_wspd'], 
                         df_phi.loc[is_cmod, 'wind_field_median'], 
-                        color='blue', label='good')
-        axs[i, 1].scatter(df_phi.loc[~is_cmod, 'era5_wspd'], 
+                        color='blue', label=f'good n={n_good}')
+        axs[i, 0].scatter(df_phi.loc[~is_cmod, 'era5_wspd'], 
                         df_phi.loc[~is_cmod, 'wind_field_median'], 
-                        color='orange', label='bad')
+                        color='orange', label=f'bad n={n_bad}')
         
-        axs[i, 1].plot(np.linspace(0, 30, 100), np.linspace(0, 30, 100), color='gray')
-        axs[i, 1].set_xlim(0, None)
-        axs[i, 1].set_ylim(0, None)
-        axs[i, 1].set_xlabel("ERA5 wind (m/s)")
-        axs[i, 1].set_ylabel("CMOD wind (m/s)")
-        axs[i, 1].set_title(f"{phi} - Wind; RMSE = {rmse:.2f} m/s; n = {n}")
-        axs[i, 1].legend(loc='upper left', fontsize=8)
+        axs[i, 0].plot(np.linspace(0, 30, 100), np.linspace(0, 30, 100), color='gray')
+        axs[i, 0].set_xlim(0, None)
+        axs[i, 0].set_ylim(0, None)
+        axs[i, 0].set_xlabel("ERA5 wind (m/s)")
+        axs[i, 0].set_ylabel("CMOD wind (m/s)")
+        axs[i, 0].set_title(f"{phi}; RMSE = {rmse:.2f} m/s; n total = {n}")
+        axs[i, 0].legend(loc='upper left', fontsize=8)
 
         df1.loc[df1['phi_bins'] == phi, 'nrcs_retrieval'] = df_phi['nrcs_retrieval']
 
-        axs[i, 2].scatter(range(len(df_phi)), df_phi.residual_median)
-        axs[i, 2].set_ylim(-0.0005, 0.001)
-        axs[i, 2].axhline(q, ls='--', color='red')
-        axs[i, 2].set_xlabel("Observation")
-        axs[i, 2].set_ylabel("Residual (NRCS_sar - NRCS_cmod")
+        axs[i, 1].scatter(range(len(df_phi)), df_phi.residual_median)
+        axs[i, 1].set_ylim(-0.0005, 0.001)
+        axs[i, 1].axhline(q, ls='--', color='red')
+        axs[i, 1].set_xlabel("Observation")
+        axs[i, 1].set_ylabel("Residual (NRCS_sar - NRCS_cmod")
         # axs[i, 2].set_title()
         # axs[i, 2].legend(loc='upper left', fontsize=8)
 
@@ -2461,3 +2447,107 @@ def scale_selective_filter(sigma_sar, sigma_cmod, wind_speed, pixel_size=10):
     sigma_cmod_filtered = np.fft.ifft2(sigma_cmod_fft * H).real
     
     return sigma_cmod_filtered
+
+def cmod_scale_sensitivity_analysis(sigma_sar, phi, incidence, wind_field):
+    """Test how CMOD wind retrieval degrades with noise at different spatial scales"""
+    
+    noise_levels = [0.02, 0.05, 0.1]  # 2%, 5%, 10% of signal std
+    spatial_scales = [100, 200, 500, 1000, 2000]  # meters
+    
+    # Baseline CMOD performance (no added noise)
+    wind_baseline = cmod5n_inverse(sigma_sar, phi, incidence)
+    baseline_std = np.std(wind_baseline)
+    
+    results = {}
+    
+    for noise_level in noise_levels:
+        scale_sensitivity = {}
+        
+        for scale_meters in spatial_scales:
+            # Create scale-specific noise
+            noise = generate_scale_specific_noise(sigma_sar.shape, scale_meters, 
+                                                noise_level * np.std(sigma_sar))
+            
+            # Apply noise to NRCS
+            sigma_noisy = sigma_sar + noise
+            
+            # Run CMOD inversion on noisy data
+            wind_noisy = cmod5n_inverse(sigma_noisy, phi, incidence)
+            
+            # Measure wind retrieval degradation
+            wind_rmse = np.sqrt(np.mean((wind_noisy - wind_baseline)**2))
+            wind_std_change = (np.std(wind_noisy) - baseline_std) / baseline_std
+            wind_bias = np.mean(wind_noisy - wind_baseline)
+            
+            scale_sensitivity[f'{scale_meters}m'] = {
+                'rmse_degradation': float(wind_rmse),
+                'std_change_pct': float(wind_std_change * 100),
+                'bias': float(wind_bias)
+            }
+        
+        results[f'noise_{int(noise_level*100)}pct'] = scale_sensitivity
+    
+    return results
+
+def generate_scale_specific_noise(shape, scale_meters, noise_amplitude, pixel_size=100):
+    """Generate noise concentrated at specific spatial scale"""
+    
+    # Create frequency grids
+    kx = np.fft.fftfreq(shape[0], pixel_size)
+    ky = np.fft.fftfreq(shape[1], pixel_size)
+    KX, KY = np.meshgrid(kx, ky, indexing='ij')
+    K = np.sqrt(KX**2 + KY**2)
+    
+    # Target frequency for this scale
+    k_target = 1.0 / scale_meters
+    
+    # Create band-limited noise (Gaussian in frequency domain)
+    sigma_k = k_target * 0.3  # 30% bandwidth
+    freq_filter = np.exp(-((K - k_target)**2) / (2 * sigma_k**2))
+    
+    # Generate white noise and filter to target scale
+    white_noise = np.random.normal(0, 1, shape)
+    noise_fft = np.fft.fft2(white_noise) * freq_filter
+    scale_noise = np.fft.ifft2(noise_fft).real
+    
+    # Normalize to desired amplitude
+    scale_noise = scale_noise * (noise_amplitude / np.std(scale_noise))
+    
+    return scale_noise
+
+def cmod_era5_scale_comparison(sigma_sar, phi, incidence, era5_wspd):
+    """Compare CMOD sensitivity to ERA5 at different scales"""
+    
+    # Get CMOD wind field
+    wind_cmod = cmod5n_inverse(sigma_sar, phi, incidence)
+    
+    # Apply spatial averaging at different scales
+    scales = [200, 500, 1000, 2000, 5000]  # meters
+    pixel_size = 100  # meters
+    
+    scale_comparison = {}
+    
+    for scale_meters in scales:
+        # Convert to pixels
+        box_size = max(1, int(scale_meters / pixel_size))
+        
+        # Apply spatial averaging (mimicking Zhang's approach)
+        from scipy.ndimage import uniform_filter
+        
+        wind_cmod_avg = uniform_filter(wind_cmod, box_size)
+        era5_avg = uniform_filter(era5_wspd, box_size) if era5_wspd.shape == wind_cmod.shape else era5_wspd
+        
+        # Calculate statistics at this scale
+        bias = np.nanmean(wind_cmod_avg - era5_avg)
+        rmse = np.sqrt(np.nanmean((wind_cmod_avg - era5_avg)**2))
+        correlation = np.corrcoef(wind_cmod_avg.flatten(), era5_avg.flatten())[0,1]
+        std_ratio = np.nanstd(wind_cmod_avg) / np.nanstd(era5_avg)
+        
+        scale_comparison[f'{scale_meters}m'] = {
+            'bias': float(bias),
+            'rmse': float(rmse), 
+            'correlation': float(correlation),
+            'std_ratio': float(std_ratio)
+        }
+    
+    return scale_comparison
