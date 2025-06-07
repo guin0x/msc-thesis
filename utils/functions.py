@@ -2529,7 +2529,7 @@ def cmod_era5_scale_comparison(sigma_sar, phi, incidence, era5_wspd):
     """Compare CMOD sensitivity to ERA5 at different scales"""
     
     # Get CMOD wind field
-    wind_cmod = cmod5n_inverse(sigma_sar, phi, incidence)
+    wind_cmod, *_ = cmod5n_inverse(sigma_sar, phi, incidence)
     
     # Apply spatial averaging at different scales
     scales = [200, 500, 1000, 2000, 5000]  # meters
