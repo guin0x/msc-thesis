@@ -929,7 +929,7 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
 
         fft_sigma_sar = np.fft.fftshift(np.fft.fft2(sigma_sar))
         sigma_sar_psd = np.abs(fft_sigma_sar)**2
-        radial_sigma_sar_psd = radial_profile(sigma_sar_psd)
+        _, radial_sigma_sar_psd = radial_profile(sigma_sar_psd)
 
         sigma_cmod_improved = scale_selective_filter(sigma_sar, sigma_model, np.median(wind_field))
 
