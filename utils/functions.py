@@ -9,9 +9,9 @@ from statsmodels.stats.multitest import multipletests
 import matplotlib as mpl
 from matplotlib.ticker import LogLocator
 from tqdm import tqdm
-import json
 from sklearn.metrics import root_mean_squared_error
 from matplotlib.patches import Arrow
+from scipy.ndimage import uniform_filter
 
 def read_sar_data(filepath):
     """Read SAR data from a given filepath."""
@@ -2542,7 +2542,7 @@ def cmod_era5_scale_comparison(sigma_sar, phi, incidence, era5_wspd):
         box_size = max(1, int(scale_meters / pixel_size))
         
         # Apply spatial averaging (mimicking Zhang's approach)
-        from scipy.ndimage import uniform_filter
+        
         
         wind_cmod_avg = uniform_filter(wind_cmod, box_size)
         # era5_avg = uniform_filter(era5_wspd, box_size) if era5_wspd.shape == wind_cmod.shape else era5_wspd
@@ -2551,8 +2551,9 @@ def cmod_era5_scale_comparison(sigma_sar, phi, incidence, era5_wspd):
         # Calculate statistics at this scale
         bias = np.nanmean(wind_cmod_avg - era5_avg)
         rmse = np.sqrt(np.nanmean((wind_cmod_avg - era5_avg)**2))
-        correlation = np.corrcoef(wind_cmod_avg.flatten(), era5_avg)[0,1]
-        std_ratio = np.nanstd(wind_cmod_avg) / np.nanstd(era5_avg)
+        correlation = np.corrcoef(wind_cmod_avg.flatten(), np.full_like(wind_cmod_avg, era5_avg))[0,1]
+        std_ratio = np.nanstd(wind_cmod_avg) / era5_avg if era5_avg != 0 else np.nan
+
         
         scale_comparison[f'{scale_meters}m'] = {
             'bias': float(bias),
