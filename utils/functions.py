@@ -2551,7 +2551,8 @@ def cmod_era5_scale_comparison(sigma_sar, phi, incidence, era5_wspd):
         # Calculate statistics at this scale
         bias = np.nanmean(wind_cmod_avg - era5_avg)
         rmse = np.sqrt(np.nanmean((wind_cmod_avg - era5_avg)**2))
-        correlation = np.corrcoef(wind_cmod_avg.flatten(), np.full_like(wind_cmod_avg, era5_avg))[0,1]
+        correlation = np.corrcoef(wind_cmod_avg.flatten(), np.full(wind_cmod_avg.size, era5_avg))[0,1]
+
         std_ratio = np.nanstd(wind_cmod_avg) / era5_avg if era5_avg != 0 else np.nan
 
         
