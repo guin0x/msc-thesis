@@ -931,18 +931,28 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         sigma_sar_psd = np.abs(fft_sigma_sar)**2
         _, radial_sigma_sar_psd = radial_profile(sigma_sar_psd)
 
+        print("test 1")
+
         sigma_cmod_improved = scale_selective_filter(sigma_sar, sigma_model, np.median(wind_field))
 
         residual_improved = sigma_sar - sigma_cmod_improved
         
         fft_resid_impr = np.fft.fftshift(np.fft.fft2(residual_improved))
 
+        print("test 2")
+
         psd_resid_impr = np.abs(fft_resid_impr)**2
 
         _, radial_resid_psd_impr = radial_profile(psd_resid_impr)
 
+        print("test 3")
+
         cmod_noise_sensitivity = cmod_scale_sensitivity_analysis(sigma_sar, phi, incidence, wind_field)
+
+        print("test 4")
         cmod_era5_scales = cmod_era5_scale_comparison(sigma_sar, phi, incidence, era5_wspd)
+
+        print("test 5")
 
         return {
             'sar_filepath': sar_filepath,
