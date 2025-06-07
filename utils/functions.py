@@ -2443,7 +2443,7 @@ def scale_selective_filter(sigma_sar, sigma_cmod, wind_speed, pixel_size=10):
     H[0,0] = 1  # preserve DC
     
     # Apply filter
-    sigma_cmod_fft = np.fft.fftfreq(sigma_cmod)
+    sigma_cmod_fft = np.fft.fft2(sigma_cmod)
     sigma_cmod_filtered = np.fft.ifft2(sigma_cmod_fft * H).real
     
     return sigma_cmod_filtered
