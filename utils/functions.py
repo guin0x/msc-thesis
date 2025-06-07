@@ -2465,7 +2465,7 @@ def cmod_scale_sensitivity_analysis(sigma_sar, phi, incidence, wind_field):
     spatial_scales = [100, 200, 500, 1000, 2000]  # meters
     
     # Baseline CMOD performance (no added noise)
-    wind_baseline = cmod5n_inverse(sigma_sar, phi, incidence)
+    wind_baseline, *_ = cmod5n_inverse(sigma_sar, phi, incidence)
     baseline_std = np.std(wind_baseline)
     
     results = {}
@@ -2482,7 +2482,7 @@ def cmod_scale_sensitivity_analysis(sigma_sar, phi, incidence, wind_field):
             sigma_noisy = sigma_sar + noise
             
             # Run CMOD inversion on noisy data
-            wind_noisy = cmod5n_inverse(sigma_noisy, phi, incidence)
+            wind_noisy, *_ = cmod5n_inverse(sigma_noisy, phi, incidence)
             
             # Measure wind retrieval degradation
             wind_rmse = np.sqrt(np.mean((wind_noisy - wind_baseline)**2))
