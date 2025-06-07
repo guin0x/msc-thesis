@@ -2545,7 +2545,8 @@ def cmod_era5_scale_comparison(sigma_sar, phi, incidence, era5_wspd):
         from scipy.ndimage import uniform_filter
         
         wind_cmod_avg = uniform_filter(wind_cmod, box_size)
-        era5_avg = uniform_filter(era5_wspd, box_size) if era5_wspd.shape == wind_cmod.shape else era5_wspd
+        # era5_avg = uniform_filter(era5_wspd, box_size) if era5_wspd.shape == wind_cmod.shape else era5_wspd
+        era5_avg = era5_wspd
         
         # Calculate statistics at this scale
         bias = np.nanmean(wind_cmod_avg - era5_avg)
