@@ -79,6 +79,7 @@ def process_radial_wind(record):
                 'b2': result['b2'],
                 'wind_field_median': result['wind_field_median'],
                 'residual_median': result['residual_median'],
+                'residual_improved_median': result['residual_improved_median'],
                 'residual_minus_mean_median': result['residual_minus_mean_median'],
                 'radial_sigma_sar_psd': result['radial_sigma_sar_psd'],
                 'cmod_scale_sensitivity': result['cmod_scale_sensitivity'],
@@ -286,41 +287,41 @@ def main():
             df_results_wv1 = pd.read_parquet(wv1_results_updated_path)
             df_results_wv2 = pd.read_parquet(wv2_results_updated_path)
 
-            # # Process WV1 files for radial wind
-            # print(f"Processing {len(records_wv1)} WV1 files for radial wind using {args.num_processes} processes...")
-            # with Pool(processes=args.num_processes) as pool:
-            #     radial_results_wv1 = list(tqdm.tqdm(
-            #         pool.imap_unordered(process_radial_wind, records_wv1),
-            #         total=len(records_wv1),
-            #     ))
-
-            # # Filter out None results and create DataFrame
-            # radial_results_wv1 = [result for result in radial_results_wv1 if result is not None]
-            # df_radial_wv1 = pd.DataFrame(radial_results_wv1)
-
-            # if filename is not None:
-            #     df_radial_wv1.to_parquet(output_path / f"wv1_wind_results_{filename}.parquet")
-            # else:
-            #     df_radial_wv1.to_parquet(output_path / "wv1_wind_results.parquet")
-
-            # Process WV2 files for radial wind
-            print(f"Processing {len(records_wv2)} WV2 files for radial wind...")
+            # Process WV1 files for radial wind
+            print(f"Processing {len(records_wv1)} WV1 files for radial wind using {args.num_processes} processes...")
             with Pool(processes=args.num_processes) as pool:
-                radial_results_wv2 = list(tqdm.tqdm(
-                    pool.imap_unordered(process_radial_wind, records_wv2),
-                    total=len(records_wv2),
+                radial_results_wv1 = list(tqdm.tqdm(
+                    pool.imap_unordered(process_radial_wind, records_wv1),
+                    total=len(records_wv1),
                 ))
 
-            # filter out None results and create DataFrame
-            radial_results_wv2 = [result for result in radial_results_wv2 if result is not None]
-            df_radial_wv2 = pd.DataFrame(radial_results_wv2)
-
-            print("Saving updated results with wind_radial_psd...")
+            # Filter out None results and create DataFrame
+            radial_results_wv1 = [result for result in radial_results_wv1 if result is not None]
+            df_radial_wv1 = pd.DataFrame(radial_results_wv1)
 
             if filename is not None:
-                df_radial_wv2.to_parquet(output_path / f"wv2_wind_results_{filename}.parquet")
+                df_radial_wv1.to_parquet(output_path / f"wv1_wind_results_{filename}.parquet")
             else:
-                df_radial_wv2.to_parquet(output_path / "wv2_wind_results.parquet")
+                df_radial_wv1.to_parquet(output_path / "wv1_wind_results.parquet")
+
+            # # Process WV2 files for radial wind
+            # print(f"Processing {len(records_wv2)} WV2 files for radial wind...")
+            # with Pool(processes=args.num_processes) as pool:
+            #     radial_results_wv2 = list(tqdm.tqdm(
+            #         pool.imap_unordered(process_radial_wind, records_wv2),
+            #         total=len(records_wv2),
+            #     ))
+
+            # # filter out None results and create DataFrame
+            # radial_results_wv2 = [result for result in radial_results_wv2 if result is not None]
+            # df_radial_wv2 = pd.DataFrame(radial_results_wv2)
+
+            # print("Saving updated results with wind_radial_psd...")
+
+            # if filename is not None:
+            #     df_radial_wv2.to_parquet(output_path / f"wv2_wind_results_{filename}.parquet")
+            # else:
+            #     df_radial_wv2.to_parquet(output_path / "wv2_wind_results.parquet")
 
             return
 

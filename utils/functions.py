@@ -958,8 +958,9 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             'b2': b2_stats,  # Already JSON-serializable
             'wind_field_median': wind_field_median,
             'residual_median': np.median(residual).tolist(),
+            'residual_improved_median': np.median(residual_improved).tolist(),
             'residual_minus_mean_median': np.median(residual_minus_mean).tolist(),
-            'radial_sigma_sar_psd': radial_sigma_sar_psd[1].tolist(),
+            'radial_sigma_sar_psd': radial_sigma_sar_psd.tolist(),
             'cmod_scale_sensitivity': cmod_noise_sensitivity,
             'cmod_era5_scale_comparison': cmod_era5_scales,
             # 'wind_field_enhanced_median': np.nanmedian(wind_field_enhanced)
@@ -1309,19 +1310,27 @@ def bad_or_good_retrieval(row, median):
 
 def create_phi_bins_columns(df, col, v=1):
     """Create bins in [−135, 135]° range with step `v`, split at −45 and 45 degrees"""
-
-    if 90 % v != 0:
+    if 180 % v != 0:
         raise ValueError("v must divide 90 exactly")
-
-    bins = list(range(-180, 181, v))  # degrees
-
+   
+    end = int(-180 + v/2)
+    beg = -end
+    bins = list(range(end, beg+1, v))  # degrees
     df["phi_bins"] = pd.cut(
         df[col],
         bins=bins,
         right=False,
         include_lowest=True
     )
-    df["phi_bins"] = df["phi_bins"].astype(str)
+    
+    # Add the new category before filling
+    last_bin = f"[{beg}, {end})"
+
+    df["phi_bins"] = df["phi_bins"].cat.add_categories([last_bin])
+    df["phi_bins"] = df["phi_bins"].fillna(last_bin)
+    
+    df["phi_bins"] = df["phi_bins"].astype(str)    
+    
     return df
 
 
@@ -2243,7 +2252,7 @@ def plot_radial_psd_diff_combined(df, wavelengths,
     # Redefine quadrants to work with centered bins
     # Now quadrants are centered around the cardinal directions
     quadrants = [(-135, -45), (-45, 45), (45, 135), (135, 225)]  # 225 wraps to -135
-    quadrant_labels = ['-135° to -45°', '-45° to 45°', '45° to 135°', '135° to -135°']
+    quadrant_labels = ['-135° to -45° (crosswind)', '-45° to 45° (upwind)', '45° to 135° (crosswind)', '135° to -135° (downwind)']
     
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     axes = axes.flatten()
@@ -2354,7 +2363,6 @@ def plot_retrieval_quality_per_q(q, df1):
 
     for i, phi in enumerate(phi_bins):
         df_phi = df1[df1['phi_bins'] == phi].copy()
-        # df_phi = split_bad_cluster_with_slope(df_phi, slope=SLOPE, intercept=INTERCEPT)
         is_cmod = df_phi['nrcs_retrieval'] == 'good'
 
         n = len(df_phi)
@@ -2362,11 +2370,11 @@ def plot_retrieval_quality_per_q(q, df1):
         n_good = len(df_phi.loc[is_cmod])
         n_bad = len(df_phi.loc[~is_cmod])
         
-
-        
         y_true = df_phi['sigma_cmod_median']
         y_pred = df_phi['sigma_sar_median']
         rmse = root_mean_squared_error(y_true, y_pred)
+
+        d1[phi] = round(rmse, 2)
         
         axs[i, 0].scatter(df_phi.loc[is_cmod, 'era5_wspd'], 
                         df_phi.loc[is_cmod, 'wind_field_median'], 
@@ -2390,8 +2398,6 @@ def plot_retrieval_quality_per_q(q, df1):
         axs[i, 1].axhline(q, ls='--', color='red')
         axs[i, 1].set_xlabel("Observation")
         axs[i, 1].set_ylabel("Residual (NRCS_sar - NRCS_cmod")
-        # axs[i, 2].set_title()
-        # axs[i, 2].legend(loc='upper left', fontsize=8)
 
     plt.tight_layout(rect=[0, 0, 1, 0.97])
     plt.savefig(f"../images/good_bad_classification/q{int(q*100)}-{wv_type}.png")
