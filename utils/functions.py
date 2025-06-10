@@ -1262,49 +1262,67 @@ def bad_or_good_retrieval(row, median):
         return "good"
     return "bad"
 
+# def create_phi_bins_columns(df, col, v=1):
+#     # Create bins centered around 0
+#     # For v=10: [..., -25, -15, -5, 5, 15, 25, ...]
+#     # This gives bins: [..., [-25,-15), [-15,-5), [-5,5), [5,15), [15,25), ...]
+    
+#     # Start from -v/2 and go in both directions
+#     half_v = v / 2
+    
+#     # Calculate how many bins we need on each side to cover [-180, 180]
+#     max_bins = int(180 / v) + 2  # +2 to ensure we cover the full range
+    
+#     # Create bin edges centered around 0
+#     bin_edges = []
+    
+#     # Add the center edge
+#     bin_edges.append(-half_v)
+#     bin_edges.append(half_v)
+    
+#     # Add negative bins (going backwards from -half_v)
+#     for i in range(1, max_bins):
+#         bin_edges.insert(0, -half_v - i * v)
+    
+#     # Add positive bins (going forwards from half_v)
+#     for i in range(1, max_bins):
+#         bin_edges.append(half_v + i * v)
+    
+#     # Sort and remove duplicates
+#     bin_edges = sorted(set(bin_edges))
+    
+#     # Make sure we cover the full range [-180, 180]
+#     while min(bin_edges) > -180:
+#         bin_edges.insert(0, min(bin_edges) - v)
+#     while max(bin_edges) < 180:
+#         bin_edges.append(max(bin_edges) + v)
+    
+#     df['phi_bins'] = pd.cut(
+#         df[col],
+#         bins=bin_edges,
+#         right=False,
+#         include_lowest=True
+#     )
+#     df["phi_bins"] = df["phi_bins"].astype(str)
+#     return df
+
 def create_phi_bins_columns(df, col, v=1):
-    # Create bins centered around 0
-    # For v=10: [..., -25, -15, -5, 5, 15, 25, ...]
-    # This gives bins: [..., [-25,-15), [-15,-5), [-5,5), [5,15), [15,25), ...]
-    
-    # Start from -v/2 and go in both directions
-    half_v = v / 2
-    
-    # Calculate how many bins we need on each side to cover [-180, 180]
-    max_bins = int(180 / v) + 2  # +2 to ensure we cover the full range
-    
-    # Create bin edges centered around 0
-    bin_edges = []
-    
-    # Add the center edge
-    bin_edges.append(-half_v)
-    bin_edges.append(half_v)
-    
-    # Add negative bins (going backwards from -half_v)
-    for i in range(1, max_bins):
-        bin_edges.insert(0, -half_v - i * v)
-    
-    # Add positive bins (going forwards from half_v)
-    for i in range(1, max_bins):
-        bin_edges.append(half_v + i * v)
-    
-    # Sort and remove duplicates
-    bin_edges = sorted(set(bin_edges))
-    
-    # Make sure we cover the full range [-180, 180]
-    while min(bin_edges) > -180:
-        bin_edges.insert(0, min(bin_edges) - v)
-    while max(bin_edges) < 180:
-        bin_edges.append(max(bin_edges) + v)
-    
-    df['phi_bins'] = pd.cut(
+    """Create bins in [−135, 135]° range with step `v`, split at −45 and 45 degrees"""
+
+    if 90 % v != 0:
+        raise ValueError("v must divide 90 exactly")
+
+    bins = list(range(-180, 181, v))  # degrees
+
+    df["phi_bins"] = pd.cut(
         df[col],
-        bins=bin_edges,
+        bins=bins,
         right=False,
         include_lowest=True
     )
     df["phi_bins"] = df["phi_bins"].astype(str)
     return df
+
 
 def create_dfs_from_phi_interval(phi_bin, df_complete, df_results_updated, df_results_wind):
     if not isinstance(phi_bin, str):
@@ -2214,6 +2232,8 @@ def plot_radial_psd_diff_combined(df, wavelengths,
     """
     q = int(q*100)
 
+    d = {str(k): v for k, v in d.items()}
+
     wv_type = df.wm_type.unique()[0]
     df1_good = df[df['nrcs_retrieval'] == 'good']
     df1_bad = df[df['nrcs_retrieval'] == 'bad']
@@ -2241,10 +2261,12 @@ def plot_radial_psd_diff_combined(df, wavelengths,
         colors = plt.cm.viridis(np.linspace(0, 1, len(q_bins)))
         
         for i, phi_bin in enumerate(q_bins):
+            phi_bin_str = str(phi_bin)
             good_phi = df1_good[df1_good['phi_bins'] == phi_bin]
             bad_phi = df1_bad[df1_bad['phi_bins'] == phi_bin]
             n_good = len(good_phi)
             n_bad = len(bad_phi)
+            
             
             if len(good_phi) > 10 and len(bad_phi) > 10:
                 good_arrays = np.stack(good_phi[col].values)
@@ -2255,7 +2277,7 @@ def plot_radial_psd_diff_combined(df, wavelengths,
                 
                 diff = good_median / bad_median
                 ax.plot(wavelengths, diff, color=colors[i], 
-                       label=f'{phi_bin}|n={n_good}/{n_bad}|RMSE={d[phi_bin]}m/s', linewidth=2)
+                       label=f'{phi_bin_str}|n={n_good}/{n_bad}|RMSE={d[phi_bin_str]}m/s', linewidth=2)
                 
                 if plot_conf_interval:
                     good_rel_lower = good_lower / good_median

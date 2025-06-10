@@ -286,22 +286,22 @@ def main():
             df_results_wv1 = pd.read_parquet(wv1_results_updated_path)
             df_results_wv2 = pd.read_parquet(wv2_results_updated_path)
 
-            # Process WV1 files for radial wind
-            print(f"Processing {len(records_wv1)} WV1 files for radial wind using {args.num_processes} processes...")
-            with Pool(processes=args.num_processes) as pool:
-                radial_results_wv1 = list(tqdm.tqdm(
-                    pool.imap_unordered(process_radial_wind, records_wv1),
-                    total=len(records_wv1),
-                ))
+            # # Process WV1 files for radial wind
+            # print(f"Processing {len(records_wv1)} WV1 files for radial wind using {args.num_processes} processes...")
+            # with Pool(processes=args.num_processes) as pool:
+            #     radial_results_wv1 = list(tqdm.tqdm(
+            #         pool.imap_unordered(process_radial_wind, records_wv1),
+            #         total=len(records_wv1),
+            #     ))
 
-            # Filter out None results and create DataFrame
-            radial_results_wv1 = [result for result in radial_results_wv1 if result is not None]
-            df_radial_wv1 = pd.DataFrame(radial_results_wv1)
+            # # Filter out None results and create DataFrame
+            # radial_results_wv1 = [result for result in radial_results_wv1 if result is not None]
+            # df_radial_wv1 = pd.DataFrame(radial_results_wv1)
 
-            if filename is not None:
-                df_radial_wv1.to_parquet(output_path / f"wv1_wind_results_{filename}.parquet")
-            else:
-                df_radial_wv1.to_parquet(output_path / "wv1_wind_results.parquet")
+            # if filename is not None:
+            #     df_radial_wv1.to_parquet(output_path / f"wv1_wind_results_{filename}.parquet")
+            # else:
+            #     df_radial_wv1.to_parquet(output_path / "wv1_wind_results.parquet")
 
             # Process WV2 files for radial wind
             print(f"Processing {len(records_wv2)} WV2 files for radial wind...")
