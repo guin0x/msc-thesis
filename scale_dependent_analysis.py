@@ -69,9 +69,9 @@ def process_radial_wind(record):
         if result is not None:
             return {
                 'sar_filepath': record['sar_filepath'],
-                'b0_stats': record['b0_stats'],
-                'b1_stats': record['b1_stats'],
-                'b2_stats': record['b2_stats']
+                'b0_stats': result['b0_stats'],
+                'b1_stats': result['b1_stats'],
+                'b2_stats': result['b2_stats']
                 # 'radial_wind_psd': result['radial_wind_psd'],
                 # 'radial_residual_psd': result['radial_residual_psd'],  
                 # 'radial_residual_psd_improved': result['radial_residual_psd_improved'],
