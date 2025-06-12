@@ -11,7 +11,7 @@ from matplotlib.ticker import LogLocator
 from tqdm import tqdm
 from sklearn.metrics import root_mean_squared_error
 from matplotlib.patches import Arrow
-from scipy.ndimage import uniform_filter
+from scipy.ndimage import uniform_filter, gaussian_filter
 
 def read_sar_data(filepath):
     """Read SAR data from a given filepath."""
@@ -867,21 +867,22 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         
         azimuth_look = np.mod(ground_heading + 90, 360)
         phi = compute_phi(era5_wdir, azimuth_look)
-        wind_field, b0, b1, b2 = cmod5n_inverse(sigma_sar, phi, incidence)
 
-        wind_field_median = np.nanmedian(wind_field)
+        # wind_field, b0, b1, b2 = cmod5n_inverse(sigma_sar, phi, incidence)
 
-        b0_stats = {"mean": float(np.nanmean(b0)), 
-                    "median": float(np.nanmedian(b0)), 
-                    "std": float(np.nanstd(b0))}
+        # wind_field_median = np.nanmedian(wind_field)
+
+        # b0_stats = {"mean": float(np.nanmean(b0)), 
+        #             "median": float(np.nanmedian(b0)), 
+        #             "std": float(np.nanstd(b0))}
         
-        b1_stats = {"mean": float(np.nanmean(b1)),
-                    "median": float(np.nanmedian(b1)), 
-                    "std": float(np.nanstd(b1))}
+        # b1_stats = {"mean": float(np.nanmean(b1)),
+        #             "median": float(np.nanmedian(b1)), 
+        #             "std": float(np.nanstd(b1))}
         
-        b2_stats = {"mean": float(np.nanmean(b2)),
-                    "median": float(np.nanmedian(b2)), 
-                    "std": float(np.nanstd(b2))}
+        # b2_stats = {"mean": float(np.nanmean(b2)),
+        #             "median": float(np.nanmedian(b2)), 
+        #             "std": float(np.nanstd(b2))}
 
         def radial_profile(data, center=None):
             y, x = np.indices(data.shape)
@@ -904,65 +905,129 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
             distances, radial_psd = radial_profile(psd)
             return radial_psd, distances, psd
 
-        radial_wind_psd, distances, psd_wind = process_wind_field(wind_field)
+        # radial_wind_psd, distances, psd_wind = process_wind_field(wind_field)
         
-        min_length = min(len(distances), len(radial_wind_psd))
-        distances = distances[:min_length]
-        radial_wind_psd = radial_wind_psd[:min_length]
+        # min_length = min(len(distances), len(radial_wind_psd))
+        # distances = distances[:min_length]
+        # radial_wind_psd = radial_wind_psd[:min_length]
+
+        # pixel_size = 100
+        # k_values_wind = distances * (1.0 / (pixel_size * max(psd_wind.shape)))
+
+        # sigma_model, _, _, _ = cmod5n_forward(wind_field, phi, incidence)
+
+        # residual = sigma_sar - sigma_model
+        # residual_minus_mean = residual - np.mean(residual)
+
+        # fft_resid = np.fft.fftshift(np.fft.fft2(residual))
+        # psd_resid = np.abs(fft_resid)**2
+
+        # _, radial_resid_psd = radial_profile(psd_resid)
+
+        # wind_field_residual = wind_field - era5_wspd
+
+        # wind_field_residual_psd, _, _ = process_wind_field(wind_field_residual)
+
+        # fft_sigma_sar = np.fft.fftshift(np.fft.fft2(sigma_sar))
+        # sigma_sar_psd = np.abs(fft_sigma_sar)**2
+        
+        # _, radial_sigma_sar_psd = radial_profile(sigma_sar_psd)
+
+        # sigma_cmod_improved = scale_selective_filter(sigma_sar, sigma_model, np.median(wind_field))
+
+        # residual_improved = sigma_sar - sigma_cmod_improved
+        
+        # fft_resid_impr = np.fft.fftshift(np.fft.fft2(residual_improved))
+
+        # psd_resid_impr = np.abs(fft_resid_impr)**2
+
+        # _, radial_resid_psd_impr = radial_profile(psd_resid_impr)
+
+        # cmod_noise_sensitivity = cmod_scale_sensitivity_analysis(sigma_sar, phi, incidence, wind_field)
+
+        # cmod_era5_scales = cmod_era5_scale_comparison(sigma_sar, phi, incidence, era5_wspd)
+
+        def add_subkm_noise(sigma_sar, pixel_size, noise_levels, seed=None):
+            """
+            Add noise to sigma_sar at spatial scales < 1 km using spatial-domain filtering.
+            
+            Parameters:
+                sigma_sar: 2D array of original sigma0 values
+                pixel_size: pixel size in meters
+                noise_levels: list of standard deviations for noise
+                seed: optional random seed
+                
+            Returns:
+                List of sigma_sar arrays with added noise (one per noise level)
+            """
+            rng = np.random.default_rng(seed)
+            subkm_noise_maps = []
+            
+            s = 100
+
+            for noise_std in noise_levels:
+                white_noise = rng.normal(0, noise_std, sigma_sar.shape)
+
+
+                highpass = white_noise - gaussian_filter(white_noise, sigma = s / pixel_size)
+                subkm_noise = gaussian_filter(highpass, sigma = s / pixel_size)
+
+                sigma_noisy = sigma_sar + subkm_noise
+
+                subkm_noise_maps.append(sigma_noisy)
+
+                subkm_noise -= subkm_noise.mean()
+                sigma_noisy = np.clip(sigma_sar + subkm_noise, a_min=0, a_max=None)
+
+            return subkm_noise_maps
+        
+        noise_levels = [0.05, 0.1, 0.2, 0.3, 0.5]
+        noise_levels = [n*2 for n in noise_levels]
+
+        noise_levels_str = [str(n) for n in noise_levels]
+
+        b0d, b1d, b2d = {}, {} , {}
+
+        PSD_sigma0_radial, distances, PSD_sigma0_2d = process_wind_field(sigma_sar)
 
         pixel_size = 100
-        k_values_wind = distances * (1.0 / (pixel_size * max(psd_wind.shape)))
+        k_values = distances * (1.0 / (pixel_size * max(PSD_sigma0_2d.shape)))
 
-        sigma_model, _, _, _ = cmod5n_forward(wind_field, phi, incidence)
+        subkm_noise = add_subkm_noise(sigma_sar, pixel_size, noise_levels)
 
-        residual = sigma_sar - sigma_model
-        residual_minus_mean = residual - np.mean(residual)
-
-        fft_resid = np.fft.fftshift(np.fft.fft2(residual))
-        psd_resid = np.abs(fft_resid)**2
-
-        _, radial_resid_psd = radial_profile(psd_resid)
-
-        wind_field_residual = wind_field - era5_wspd
-
-        wind_field_residual_psd, _, _ = process_wind_field(wind_field_residual)
-
-        fft_sigma_sar = np.fft.fftshift(np.fft.fft2(sigma_sar))
-        sigma_sar_psd = np.abs(fft_sigma_sar)**2
-        
-        _, radial_sigma_sar_psd = radial_profile(sigma_sar_psd)
-
-        sigma_cmod_improved = scale_selective_filter(sigma_sar, sigma_model, np.median(wind_field))
-
-        residual_improved = sigma_sar - sigma_cmod_improved
-        
-        fft_resid_impr = np.fft.fftshift(np.fft.fft2(residual_improved))
-
-        psd_resid_impr = np.abs(fft_resid_impr)**2
-
-        _, radial_resid_psd_impr = radial_profile(psd_resid_impr)
-
-        cmod_noise_sensitivity = cmod_scale_sensitivity_analysis(sigma_sar, phi, incidence, wind_field)
-
-        cmod_era5_scales = cmod_era5_scale_comparison(sigma_sar, phi, incidence, era5_wspd)
+        for i, sigma0_noise in enumerate(subkm_noise):
+            _, b0, b1, b2 = cmod5n_inverse(sigma_sar, phi, incidence)
+            # b0, b1, b2 = np.median(b0), np.median(b1), np.median(b2)
+            b0d[noise_levels_str[i]] = {"median": np.nanmedian(b0), 
+                                        "mean": np.nanmean(b0),
+                                        "std": np.nanstd(b0)}
+            b1d[noise_levels_str[i]] = {"median": np.nanmedian(b1), 
+                                        "mean": np.nanmean(b1),
+                                        "std": np.nanstd(b1)}  
+            b2d[noise_levels_str[i]] = {"median": np.nanmedian(b2), 
+                                        "mean": np.nanmean(b2),
+                                        "std": np.nanstd(b2)}  
 
         return {
             'sar_filepath': sar_filepath,
-            'radial_wind_psd': radial_wind_psd.tolist(),  # Convert to regular Python list
-            'radial_residual_psd': radial_resid_psd.tolist(),  # Convert to regular Python list
-            'radial_residual_psd_improved': radial_resid_psd_impr.tolist(),
-            'radial_wind_field_residual_psd': wind_field_residual_psd.tolist(),
-            'k_values_wind': k_values_wind.tolist(),      # Convert to regular Python list
-            'b0': b0_stats,  # Already JSON-serializable
-            'b1': b1_stats,  # Already JSON-serializable
-            'b2': b2_stats,  # Already JSON-serializable
-            'wind_field_median': wind_field_median,
-            'residual_median': np.median(residual).tolist(),
-            'residual_improved_median': np.median(residual_improved).tolist(),
-            'residual_minus_mean_median': np.median(residual_minus_mean).tolist(),
-            'radial_sigma_sar_psd': radial_sigma_sar_psd.tolist(),
-            'cmod_scale_sensitivity': cmod_noise_sensitivity,
-            'cmod_era5_scale_comparison': cmod_era5_scales,
+            'b0_stats': b0d,
+            'b1_stats': b1d,
+            'b2_stats': b2d
+            # 'radial_wind_psd': radial_wind_psd.tolist(),  # Convert to regular Python list
+            # 'radial_residual_psd': radial_resid_psd.tolist(),  # Convert to regular Python list
+            # 'radial_residual_psd_improved': radial_resid_psd_impr.tolist(),
+            # 'radial_wind_field_residual_psd': wind_field_residual_psd.tolist(),
+            # 'k_values_wind': k_values_wind.tolist(),      # Convert to regular Python list
+            # 'b0': b0_stats,  # Already JSON-serializable
+            # 'b1': b1_stats,  # Already JSON-serializable
+            # 'b2': b2_stats,  # Already JSON-serializable
+            # 'wind_field_median': wind_field_median,
+            # 'residual_median': np.median(residual).tolist(),
+            # 'residual_improved_median': np.median(residual_improved).tolist(),
+            # 'residual_minus_mean_median': np.median(residual_minus_mean).tolist(),
+            # 'radial_sigma_sar_psd': radial_sigma_sar_psd.tolist(),
+            # 'cmod_scale_sensitivity': cmod_noise_sensitivity,
+            # 'cmod_era5_scale_comparison': cmod_era5_scales,
             # 'wind_field_enhanced_median': np.nanmedian(wind_field_enhanced)
         }
     

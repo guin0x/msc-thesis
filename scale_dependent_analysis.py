@@ -302,26 +302,26 @@ def main():
             if filename is not None:
                 df_radial_wv1.to_parquet(output_path / f"wv1_wind_results_{filename}.parquet")
             else:
-                df_radial_wv1.to_parquet(output_path / "wv1_wind_results.parquet")
+                df_radial_wv1.to_parquet(output_path / "wv1_b-sensitivity_results.parquet")
 
-            # # Process WV2 files for radial wind
-            # print(f"Processing {len(records_wv2)} WV2 files for radial wind...")
-            # with Pool(processes=args.num_processes) as pool:
-            #     radial_results_wv2 = list(tqdm.tqdm(
-            #         pool.imap_unordered(process_radial_wind, records_wv2),
-            #         total=len(records_wv2),
-            #     ))
+            # Process WV2 files for radial wind
+            print(f"Processing {len(records_wv2)} WV2 files for radial wind...")
+            with Pool(processes=args.num_processes) as pool:
+                radial_results_wv2 = list(tqdm.tqdm(
+                    pool.imap_unordered(process_radial_wind, records_wv2),
+                    total=len(records_wv2),
+                ))
 
-            # # filter out None results and create DataFrame
-            # radial_results_wv2 = [result for result in radial_results_wv2 if result is not None]
-            # df_radial_wv2 = pd.DataFrame(radial_results_wv2)
+            # filter out None results and create DataFrame
+            radial_results_wv2 = [result for result in radial_results_wv2 if result is not None]
+            df_radial_wv2 = pd.DataFrame(radial_results_wv2)
 
-            # print("Saving updated results with wind_radial_psd...")
+            print("Saving updated results with wind_radial_psd...")
 
-            # if filename is not None:
-            #     df_radial_wv2.to_parquet(output_path / f"wv2_wind_results_{filename}.parquet")
-            # else:
-            #     df_radial_wv2.to_parquet(output_path / "wv2_wind_results.parquet")
+            if filename is not None:
+                df_radial_wv2.to_parquet(output_path / f"wv2_wind_results_{filename}.parquet")
+            else:
+                df_radial_wv2.to_parquet(output_path / "wv2_b-sensitivity_results.parquet")
 
             return
 
