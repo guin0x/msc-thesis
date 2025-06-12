@@ -69,21 +69,24 @@ def process_radial_wind(record):
         if result is not None:
             return {
                 'sar_filepath': record['sar_filepath'],
-                'radial_wind_psd': result['radial_wind_psd'],
-                'radial_residual_psd': result['radial_residual_psd'],  
-                'radial_residual_psd_improved': result['radial_residual_psd_improved'],
-                'radial_wind_field_residual_psd': result['radial_wind_field_residual_psd'],
-                'k_values_wind': result['k_values_wind'],
-                'b0': result['b0'],
-                'b1': result['b1'],
-                'b2': result['b2'],
-                'wind_field_median': result['wind_field_median'],
-                'residual_median': result['residual_median'],
-                'residual_improved_median': result['residual_improved_median'],
-                'residual_minus_mean_median': result['residual_minus_mean_median'],
-                'radial_sigma_sar_psd': result['radial_sigma_sar_psd'],
-                'cmod_scale_sensitivity': result['cmod_scale_sensitivity'],
-                'cmod_era5_scale_comparison': result['cmod_era5_scale_comparison']
+                'b0_stats': record['b0_stats'],
+                'b1_stats': record['b1_stats'],
+                'b2_stats': record['b2_stats']
+                # 'radial_wind_psd': result['radial_wind_psd'],
+                # 'radial_residual_psd': result['radial_residual_psd'],  
+                # 'radial_residual_psd_improved': result['radial_residual_psd_improved'],
+                # 'radial_wind_field_residual_psd': result['radial_wind_field_residual_psd'],
+                # 'k_values_wind': result['k_values_wind'],
+                # 'b0': result['b0'],
+                # 'b1': result['b1'],
+                # 'b2': result['b2'],
+                # 'wind_field_median': result['wind_field_median'],
+                # 'residual_median': result['residual_median'],
+                # 'residual_improved_median': result['residual_improved_median'],
+                # 'residual_minus_mean_median': result['residual_minus_mean_median'],
+                # 'radial_sigma_sar_psd': result['radial_sigma_sar_psd'],
+                # 'cmod_scale_sensitivity': result['cmod_scale_sensitivity'],
+                # 'cmod_era5_scale_comparison': result['cmod_era5_scale_comparison']
             }
         return None
     except Exception as e:
