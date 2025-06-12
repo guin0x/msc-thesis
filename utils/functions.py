@@ -996,7 +996,7 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         subkm_noise = add_subkm_noise(sigma_sar, pixel_size, noise_levels)
 
         for i, sigma0_noise in enumerate(subkm_noise):
-            _, b0, b1, b2 = cmod5n_inverse(sigma_sar, phi, incidence)
+            _, b0, b1, b2 = cmod5n_inverse(sigma0_noise, phi, incidence)
             # b0, b1, b2 = np.median(b0), np.median(b1), np.median(b2)
             b0d[noise_levels_str[i]] = {"median": np.nanmedian(b0), 
                                         "mean": np.nanmean(b0),
