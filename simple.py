@@ -2,7 +2,10 @@
 import os
 import pandas as pd
 
-def clean_folder_against_csv(folder_path, csv_path):
+csv_path = "~/msc-thesis/2020_filename.csv"
+folder_path = "/projects/fluxsar/data/Sentinel1/WV/2020"
+
+def clean_folder_against_csv(folder_path=folder_path, csv_path=csv_path):
     """
     Compares files in `folder_path` to filenames in `csv_path`.
     Prints counts of matching and non-matching files.
