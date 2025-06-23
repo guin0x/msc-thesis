@@ -23,3 +23,9 @@ def clean_folder_against_csv(folder_path=folder_path, csv_path=csv_path):
 
     print(f'Matching files: {len(matching)}')
     print(f'Non-matching files: {len(non_matching)}')
+
+def main():
+    clean_folder_against_csv()
+
+if __name__ == '__main__':
+    main()
