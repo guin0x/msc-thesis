@@ -392,3 +392,102 @@ This pattern suggests that:
    - Neither averaging nor linearization helps
 
 This is why your analysis is so valuable - it shows that simply adding scale-dependent terms to the GMF isn't enough. We need to understand how errors propagate through both the forward and inverse transformations at different scales.
+
+---
+
+Consider the following analysis.
+
+
+Data:
+
+- Around 30k images for each theta (23 and 36); 
+- no sea ice conditions
+- assumption of similar atmospheric conditions (from data: L < 0 (unstable_) and wspd > 15 m/s)
+
+Processing (for each theta in [23, 36]):
+
+retrieved_wspd = cmod_inverse(sigma_sar, phi, theta)
+
+- with sigma_sar the NRCS from Sentinel-1 WV mode,
+- phi the relative angle between radar looking direction and wind direction,
+- and theta the incidence angle.
+
+knowing that:
+
+cmod_inverse is just doing the cmod_forward 10x minimizing |sigma_sar - sigma_cmod| with 
+
+sigma_cmod = B0 * (1.0 + B1 * cos(phi) + B2 * cos(2*phi)) ** 1.6,
+
+and B0, B1 and B2 coefficients computed from another 28 empirical coefficients determined through point-wise optimization usiung over 22 million collocations between ERS-2 scatterometer backscatter triplets and ECMWF first-guesses winds,
+
+then from retrieved_wspd I do:
+
+PSD_wind = PSD(retrieved_wspd)
+
+1D_PSD_wind = radially_integrating(PSD_wind)
+
+Then I bin this data in phi bins of 20 deg: [-170, -150), [-150, -130), ... [-170, 170).
+
+Plot for both theta; And the residuals; I then integrate these residuals over all wavelengths and plot them again,
+
+
+Questions to answer:
+
+1) What can I conclude by this analysis regarding making next-gen cmod scale-aware? 
+2) Is there any evidence of scale-awareness physics that should be considered?
+3) What can I say about the B1 parameter of my CMOD? 
+4) What about the other parameters?
+
+Knowing also that it fits a model Acos(phi) + Bsin(phi) as shown below:
+
+ OLS Regression Results                            
+==============================================================================
+Dep. Variable:                      y   R-squared:                       0.647
+Model:                            OLS   Adj. R-squared:                  0.600
+Method:                 Least Squares   F-statistic:                     13.73
+Date:                Mon, 16 Jun 2025   Prob (F-statistic):           0.000408
+Time:                        19:25:30   Log-Likelihood:                -27.478
+No. Observations:                  18   AIC:                             60.96
+Df Residuals:                      15   BIC:                             63.63
+Df Model:                           2                                         
+Covariance Type:            nonrobust                                         
+==============================================================================
+                 coef    std err          t      P>|t|      [0.025      0.975]
+------------------------------------------------------------------------------
+const          2.8764      0.288     10.004      0.000       2.264       3.489
+x1             1.8782      0.407      4.619      0.000       1.012       2.745
+x2            -1.0061      0.407     -2.474      0.026      -1.873      -0.139
+==============================================================================
+Omnibus:                        1.078   Durbin-Watson:                   1.668
+Prob(Omnibus):                  0.583   Jarque-Bera (JB):                0.943
+Skew:                           0.485   Prob(JB):                        0.624
+Kurtosis:                       2.436   Cond. No.                         1.41
+==============================================================================
+
+5) What does it mean for the entire process that I still see R(φ,λ) = integral(1D_PSD_23 - 1D_PSD_36) ~ Acos(phi) + Bsin(phi) + Noise.
+
+So, to remember, these residuals are between the difference PSD_1D_retrieved_wind_23deg - PSD_1D_retrieved_wind_36deg; and, althought they should be the same, given that they should represent the true wind field, they are not the same and in fact their difference is related somehow to phi.
+
+CMOD's form σ0=B0(1+B1cos⁡ϕ+B2cos⁡2ϕ)1.6σ0=B0(1+B1cosϕ+B2cos2ϕ)1.6 assumes scale-invariant Bragg scattering. Your residuals prove this is invalid:
+∂R(λ,ϕ)∂λ≠0⇒Scale-dependent errors in B1,B2.
+
+---
+what does it mean if i have:
+
+R(λ,φ) = 1DPSD_of_wind_retrieved_from_cmod_of_SAR_obs_at_inc_angle_23_deg - 1DPSD_of_wind_retrieved_from_cmod_of_SAR_obs_at_inc_angle_23_deg
+
+and if i plot R(L, φ) for L in [250m, 500m, 200m, 5000m, 10000m] and φ in [-160, -140, ..., +180] where φ is the angle between the radar looking angle and wind direction.
+
+and these phi were taken from ranges [-170, -150), [-150, -130), etc...
+
+in total, for each incidence angle i have around 20k POS data points with wspd > 15m/s and L<0
+
+so what does it mean if when fitting a A + Bcos(phi) + Ccos(2phi) to these residuals I get the following P-values for A,B,C, and these R-sqd:
+
+L = 250m 0,0.01,0.02,0.51
+L = 500m 0,0,0.18,0.52
+L = 2000m 0,0,0.09,0.83
+L = 5000m 0,0,0,0.82
+L = 10000m 0,0,0,0.83
+
+note that  wind was retrieved with cmod5n using SAR sentinel-1 wv mode VV data and initial guess for wspd and direction from ERA5 data, and that CMOD's form σ0=B0(1+B1cos⁡ϕ+B2cos⁡2ϕ)1.6σ0=B0(1+B1cosϕ+B2cos2ϕ)1.6 assumes scale-invariant Bragg scattering.

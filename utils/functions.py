@@ -77,11 +77,6 @@ def cmod5n_inverse(sigma0, phi, incidence):
     from utils.cmod5n import cmod5n_inverse
     return cmod5n_inverse(sigma0, phi, incidence)
 
-def cmod5n_inverse_enhanced(sigma0, phi, incidence, B3):
-    """CMOD5N inverse model to compute wind speeds from sigma0 using B3"""
-    from utils.cmod5n import cmod5n_inverse_enhanced
-    return cmod5n_inverse_enhanced(sigma0, phi, incidence, B3)
-
 def compute_2d_fft(sigma0):
     """Compute 2D FFT of sigma0 values."""
 
@@ -422,177 +417,6 @@ def perform_statistical_tests(df_results, band_names):
     
     return test_results
 
-def plot_focused_analysis(df_results, output_dir):
-    """
-    Plot the most relevant analyses for scale dependency: transfer function ratios,
-    scale-dependent sensitivity, and cross-scale impact.
-    
-    Parameters:
-    -----------
-    df_results : pandas.DataFrame
-        DataFrame containing the analysis results
-    output_dir : Path
-        Path to save the plots
-    """
-    output_dir = Path(output_dir)
-    output_dir.mkdir(exist_ok=True, parents=True)
-    
-    band_labels = ['Band 0a (k < 0.0333)', 'Band 0b (0.0333 ≤ k < 0.0666)', 
-                   'Band 0c (0.0666 ≤ k < 0.1)', 'Band 1 (0.1 ≤ k < 0.3)', 
-                   'Band 2 (k ≥ 0.3)']
-    
-    ratio0a = df_results['ratio_band0a']
-    ratio0b = df_results['ratio_band0b']
-    ratio0c = df_results['ratio_band0c']
-    ratio1 = df_results['ratio_band1']
-    ratio2 = df_results['ratio_band2']
-    
-    plt.figure(figsize=(12, 6))
-    plt.boxplot([ratio0a, ratio0b, ratio0c, ratio1, ratio2], labels=band_labels)
-    plt.title('Transfer Function Ratios by Wavenumber Band')
-    plt.ylabel('Model-to-Observed Ratio')
-    plt.axhline(y=1.0, color='r', linestyle='--', alpha=0.5)  # Reference line at ratio=1
-    plt.grid(alpha=0.3)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(output_dir / 'transfer_function_ratios.png', dpi=300)
-    plt.close()
-    
-    sensitivity0a = df_results['sensitivity_metrics'].apply(lambda x: x['band0a'])
-    sensitivity0b = df_results['sensitivity_metrics'].apply(lambda x: x['band0b'])
-    sensitivity0c = df_results['sensitivity_metrics'].apply(lambda x: x['band0c'])
-    sensitivity1 = df_results['sensitivity_metrics'].apply(lambda x: x['band1'])
-    sensitivity2 = df_results['sensitivity_metrics'].apply(lambda x: x['band2'])
-    
-    plt.figure(figsize=(12, 6))
-    plt.boxplot([sensitivity0a, sensitivity0b, sensitivity0c, sensitivity1, sensitivity2], labels=band_labels)
-    plt.title('Scale-Dependent Sensitivity by Wavenumber Band')
-    plt.ylabel('Sensitivity (∆sigma0/∆wspd)')
-    plt.grid(alpha=0.3)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(output_dir / 'scale_sensitivity.png', dpi=300)
-    plt.close()
-    
-    # 3. Cross-Scale Impact Analysis
-    bias0a = df_results['errors_band0a'].apply(lambda x: x['bias'])
-    bias0b = df_results['errors_band0b'].apply(lambda x: x['bias'])
-    bias0c = df_results['errors_band0c'].apply(lambda x: x['bias'])
-    bias1 = df_results['errors_band1'].apply(lambda x: x['bias'])
-    bias2 = df_results['errors_band2'].apply(lambda x: x['bias'])
-    
-    mix1_bias = df_results['errors_mix1'].apply(lambda x: x['bias'])
-    mix2_bias = df_results['errors_mix2'].apply(lambda x: x['bias'])
-    mix3_bias = df_results['errors_mix3'].apply(lambda x: x['bias'])
-    mix4_bias = df_results['errors_mix4'].apply(lambda x: x['bias'])
-
-    no_mix_bias = df_results['errors_no_mix'].apply(lambda x: x['bias'])    
-    
-    plt.figure(figsize=(14, 8))
-    mix_labels = ['Model(0a,0b)+Obs(0c,1,2)', 'Obs(0a,0b)+Model(0c,1,2)',
-                  'Model(0a,0b,0c)+Obs(1,2)', 'Obs(0a,0b,0c)+Model(1,2)']
-    all_labels = [*band_labels, *mix_labels]
-    
-    plt.boxplot([bias0a, bias0b, bias0c, bias1, bias2, mix1_bias, mix2_bias, mix3_bias, mix4_bias], 
-                labels=all_labels)
-    plt.title('Cross-Scale Impact Analysis: Bias')
-    plt.ylabel('Bias (m/s)')
-    plt.grid(alpha=0.3)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(output_dir / 'cross_scale_impact.png', dpi=300)
-    plt.close()
-    
-    fig, axs = plt.subplots(3, 1, figsize=(14, 20))
-    
-    axs[0].boxplot([ratio0a, ratio0b, ratio0c, ratio1, ratio2], labels=band_labels)
-    axs[0].set_title('Transfer Function Ratios')
-    axs[0].set_ylabel('Model-to-Observed Ratio')
-    axs[0].axhline(y=1.0, color='r', linestyle='--', alpha=0.5)
-    axs[0].grid(alpha=0.3)
-    axs[0].tick_params(axis='x', rotation=45)
-    
-    axs[1].boxplot([sensitivity0a, sensitivity0b, sensitivity0c, sensitivity1, sensitivity2], labels=band_labels)
-    axs[1].set_title('Scale-Dependent Sensitivity')
-    axs[1].set_ylabel('Sensitivity (∆sigma0/∆wspd)')
-    axs[1].grid(alpha=0.3)
-    axs[1].tick_params(axis='x', rotation=45)
-    
-    axs[2].boxplot([bias0a, bias0b, bias0c, bias1, bias2, mix1_bias, mix2_bias, mix3_bias, mix4_bias], 
-                  labels=all_labels)
-    axs[2].set_title('Wind Retrieval Bias')
-    axs[2].set_ylabel('Bias (m/s)')
-    axs[2].grid(alpha=0.3)
-    axs[2].tick_params(axis='x', rotation=45)
-    
-    plt.tight_layout()
-    plt.savefig(output_dir / 'scale_dependency_summary.png', dpi=300)
-    plt.close()
-    
-    plt.figure(figsize=(10, 6))
-    mix_data = [mix1_bias, mix2_bias, mix3_bias, mix4_bias, no_mix_bias]
-    plt.boxplot(mix_data, labels=mix_labels)
-    plt.title('Comparison of Different Mix Strategies')
-    plt.ylabel('Bias (m/s)')
-    plt.grid(alpha=0.3)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(output_dir / 'mix_strategies_comparison.png', dpi=300)
-    plt.close()
-
-def plot_statistical_test_results(test_results, output_path):
-    """
-    Generate visualization of key statistical test results.
-    
-    Parameters:
-    -----------
-    test_results : dict
-        Dictionary with test results from perform_statistical_tests
-    output_path : Path
-        Path to save the visualization
-    """
-    tests = ['Transfer Function', 'Sensitivity', 'Cross-Scale']
-    p_values = [
-        test_results['transfer_ratio']['p_value'],
-        test_results['sensitivity']['p_value'],
-        test_results['cross_scale']['p_value']
-    ]
-    
-    valid_tests = [not np.isnan(p) for p in p_values]
-    
-    if not any(valid_tests):
-        print("Warning: No valid statistical tests to plot")
-        return
-    
-    valid_tests_names = [test for test, valid in zip(tests, valid_tests) if valid]
-    valid_p_values = [p for p, valid in zip(p_values, valid_tests) if valid]
-    significant = [p < 0.05 for p in valid_p_values]
-
-    plt.figure(figsize=(10, 6))
-    bars = plt.bar(valid_tests_names, valid_p_values, color=['green' if sig else 'red' for sig in significant])
-    
-    plt.axhline(y=0.05, color='black', linestyle='--', alpha=0.7, label='Significance Threshold (p=0.05)')
-    
-    plt.ylabel('p-value')
-    plt.title('Statistical Test Results for Scale Dependency')
-    plt.grid(alpha=0.3)
-    plt.yscale('log')
-    plt.legend()
-    
-    for bar in bars:
-        height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width()/2., height + 0.01,
-                 f'p={height:.4f}', ha='center', va='bottom', 
-                 rotation=0 if height > 0.1 else 0)
-    
-    for i, sig in enumerate(significant):
-        plt.text(i, 0.001, 'SIGNIFICANT' if sig else 'not significant',
-                ha='center', va='bottom', rotation=90, alpha=0.7)
-    
-    plt.tight_layout()
-    plt.savefig(output_path / 'statistical_test_results.png', dpi=300)
-    plt.close()
-
 def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
     """Process a single SAR file according to the workflow."""
     try:
@@ -636,23 +460,23 @@ def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
         fft_cmod, psd_cmod, kx_cmod, ky_cmod, kmag_cmod = compute_2d_fft(sigma_cmod)
         fft_cmod_strong, _, _, _, kmag_cmod_strong = compute_2d_fft(sigma_cmod_strong)
         
-        band0a_sar = band_filter(fft_sar, kmag_sar, 0, 0.0333)
-        band0b_sar = band_filter(fft_sar, kmag_sar, 0.0333, 0.0666)
-        band0c_sar = band_filter(fft_sar, kmag_sar, 0.0666, 0.1)
-        band1_sar = band_filter(fft_sar, kmag_sar, 0.1, 0.3)
-        band2_sar = band_filter(fft_sar, kmag_sar, 0.3, np.inf)
+        band0a_sar = band_filter(fft_sar, kmag_sar, 0, 0.0001) # [inf, 10km]
+        band0b_sar = band_filter(fft_sar, kmag_sar, 0.0001, 0.0002) # [10km, 5km]
+        band0c_sar = band_filter(fft_sar, kmag_sar, 0.0002, 0.0005) # [5km, 2km]
+        band1_sar = band_filter(fft_sar, kmag_sar, 0.0005, 0.002) # [2km, 500m]
+        band2_sar = band_filter(fft_sar, kmag_sar, 0.002, np.inf) # [500m, 0m]
 
-        band0a_cmod = band_filter(fft_cmod, kmag_cmod, 0, 0.0333)
-        band0b_cmod = band_filter(fft_cmod, kmag_cmod, 0.0333, 0.0666)
-        band0c_cmod = band_filter(fft_cmod, kmag_cmod, 0.0666, 0.1)
-        band1_cmod = band_filter(fft_cmod, kmag_cmod, 0.1, 0.3)
-        band2_cmod = band_filter(fft_cmod, kmag_cmod, 0.3, np.inf)
+        band0a_cmod = band_filter(fft_cmod, kmag_cmod, 0, 0.0001)
+        band0b_cmod = band_filter(fft_cmod, kmag_cmod, 0.0001, 0.0002)
+        band0c_cmod = band_filter(fft_cmod, kmag_cmod, 0.0002, 0.0005)
+        band1_cmod = band_filter(fft_cmod, kmag_cmod, 0.0005, 0.002)
+        band2_cmod = band_filter(fft_cmod, kmag_cmod, 0.002, np.inf)
 
-        band0a_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0, 0.0333)
-        band0b_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0.0333, 0.0666)
-        band0c_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0.0666, 0.1)
-        band1_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0.1, 0.3)
-        band2_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0.3, np.inf)
+        band0a_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0, 0.0001)
+        band0b_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0.0001, 0.0002)
+        band0c_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0.0002, 0.0005)
+        band1_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0.0005, 0.002)
+        band2_cmod_strong = band_filter(fft_cmod_strong, kmag_cmod_strong, 0.002, np.inf)
         
         wspd_band0a, _, _, _ = cmod5n_inverse(band0a_sar, phi_nominal, incidence)
         wspd_band0b, _, _, _ = cmod5n_inverse(band0b_sar, phi_nominal, incidence)
@@ -673,11 +497,11 @@ def process_sar_file(sar_filepath, era5_wspd, era5_wdir, seed=None):
         ratio_band2 = np.nanmean(band2_cmod / np.where(band2_sar == 0, np.nan, band2_sar))
         
         band_ranges = {
-            'band0a': (0, 0.0333),
-            'band0b': (0.0333, 0.0666),
-            'band0c': (0.0666, 0.1),
-            'band1': (0.1, 0.3),
-            'band2': (0.3, np.inf)
+            'band0a': (0, 0.0001),
+            'band0b': (0.0001, 0.0002),
+            'band0c': (0.0002, 0.0005),
+            'band1': (0.0005, 0.002),
+            'band2': (0.002, np.inf)
         }
         coherence_metrics = calculate_spectral_coherence(sigma_sar, sigma_cmod, kmag_sar, band_ranges)
         
@@ -1035,44 +859,6 @@ def process_sar_file_v3(sar_filepath, era5_wspd, era5_wdir, seed=None):
         print(f"Error processing {sar_filepath} for radial wind: {e}")
         return None
     
-def compute_B3(k_values, radial_psd, incidence_angle):
-    """
-    Compute scale-dependent B3 term using PSD correlations
-    Returns scalar B3 value for the entire scene
-    """
-    # Critical wavelengths from your correlation analysis (in wavenumbers [m^-1])
-    if incidence_angle < 30:  # WV1 (23°)
-        peaks = [
-            (0.01, 0.005),    # 600m scale (k, sigma)
-            (0.003, 0.002),   # 2km scale
-            (0.001, 0.0005)   # 6km scale
-        ]
-        weights = [0.8, -0.3, 0.2]  # Correlation strengths from your plots
-    else:  # WV2 (36°)
-        peaks = [
-            (0.008, 0.004),   # 785m scale
-            (0.0025, 0.0015), # 2.5km scale
-            (0.0008, 0.0004)  # 7.85km scale
-        ]
-        weights = [0.7, -0.5, 0.1]
-
-    # Normalize PSD
-    psd_norm = (radial_psd - np.nanmean(radial_psd)) / np.nanstd(radial_psd)
-    
-    B3 = 0.0
-    for (k0, sigma), weight in zip(peaks, weights):
-        # Find closest spectral bin
-        idx = np.nanargmin(np.abs(k_values - k0))
-        
-        if not np.isnan(psd_norm[idx]):
-            # Gaussian weighting around target wavenumber
-            gauss_weight = np.exp(-(k_values[idx] - k0)**2/(2*sigma**2))
-            B3 += weight * psd_norm[idx] * gauss_weight
-
-    # Scale to match CMOD5.n coefficient magnitudes
-    B3 *= 0.03  # Empirical scaling factor from your data
-    return np.clip(B3, -0.05, 0.05)  # Prevent overcorrection
-
 def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidence=0.95, 
                                figsize=(12, 8), x_range=None, y_range=None, 
                                use_log_scale=True, wavelength=False,
@@ -1113,6 +899,9 @@ def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidenc
     """
     
     plt.style.use('seaborn-v0_8-whitegrid')
+
+    wv2_val = []
+    wv1_val = []
     
     colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
     
@@ -1242,6 +1031,12 @@ def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidenc
                            color=colors[i % len(colors)], 
                            alpha=0.15)
                                
+
+            if i == 0:
+                wv2_val.append(mean_values)
+            else:
+                wv1_val.append(mean_values)
+
         except Exception as e:
             print(f"Error processing {title}: {str(e)}")
             continue
@@ -1297,7 +1092,8 @@ def plot_avg_spectral_density(k_values, df_list, title_list, suptitle, confidenc
         plt.tight_layout()
         plt.show()
     
-    return fig, ax
+    residual = wv2_val[0] - wv1_val[0]
+    return fig, ax, residual, wv2_val[0], wv1_val[0]
 
 def pad_arrays_to_max_length(df, column_name, size=None):
     max_length = df[column_name].apply(lambda x: len(x)).max()
@@ -1328,50 +1124,6 @@ def bad_or_good_retrieval(row, median):
     if row < median:
         return "good"
     return "bad"
-
-# def create_phi_bins_columns(df, col, v=1):
-#     # Create bins centered around 0
-#     # For v=10: [..., -25, -15, -5, 5, 15, 25, ...]
-#     # This gives bins: [..., [-25,-15), [-15,-5), [-5,5), [5,15), [15,25), ...]
-    
-#     # Start from -v/2 and go in both directions
-#     half_v = v / 2
-    
-#     # Calculate how many bins we need on each side to cover [-180, 180]
-#     max_bins = int(180 / v) + 2  # +2 to ensure we cover the full range
-    
-#     # Create bin edges centered around 0
-#     bin_edges = []
-    
-#     # Add the center edge
-#     bin_edges.append(-half_v)
-#     bin_edges.append(half_v)
-    
-#     # Add negative bins (going backwards from -half_v)
-#     for i in range(1, max_bins):
-#         bin_edges.insert(0, -half_v - i * v)
-    
-#     # Add positive bins (going forwards from half_v)
-#     for i in range(1, max_bins):
-#         bin_edges.append(half_v + i * v)
-    
-#     # Sort and remove duplicates
-#     bin_edges = sorted(set(bin_edges))
-    
-#     # Make sure we cover the full range [-180, 180]
-#     while min(bin_edges) > -180:
-#         bin_edges.insert(0, min(bin_edges) - v)
-#     while max(bin_edges) < 180:
-#         bin_edges.append(max(bin_edges) + v)
-    
-#     df['phi_bins'] = pd.cut(
-#         df[col],
-#         bins=bin_edges,
-#         right=False,
-#         include_lowest=True
-#     )
-#     df["phi_bins"] = df["phi_bins"].astype(str)
-#     return df
 
 def create_phi_bins_columns(df, col, v=1):
     """Create bins in [−135, 135]° range with step `v`, split at −45 and 45 degrees"""
@@ -2174,7 +1926,6 @@ def analyze_b_parameter_vs_psd_bootstrap(b_param_values, psd_values, k_values, p
 
     return correlations, lower_ci, upper_ci, wavelengths
 
-
 def plot_b_coeff_correlations(
     wavelengths,
     b0_correlations, b0_ci_lower=None, b0_ci_upper=None,
@@ -2259,7 +2010,17 @@ def bootstrap_median_ci(data, n_bootstrap=1000, confidence=0.95):
     Returns:
     median, lower_ci, upper_ci (all arrays of length = n_wavelengths)
     """
-    n_samples, n_wavelengths = data.shape
+    
+    if isinstance(data, list):
+        data = np.array(data)
+
+    elif isinstance(data, pd.Series):
+        data = data.reset_index(drop=True)
+
+    elif isinstance(data, pd.DataFrame):
+        data = data.reset_index(drop=True)
+
+    n_samples = len(data)
     
     medians = []
     
@@ -2267,6 +2028,7 @@ def bootstrap_median_ci(data, n_bootstrap=1000, confidence=0.95):
     for _ in range(n_bootstrap):
         # Resample with replacement
         bootstrap_indices = np.random.choice(n_samples, size=n_samples, replace=True)
+
         bootstrap_sample = data[bootstrap_indices]
         
         # Calculate median for each wavelength

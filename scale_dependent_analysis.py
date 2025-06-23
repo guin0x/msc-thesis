@@ -21,7 +21,7 @@ from utils.functions import (
     plot_statistical_test_results
 )
 
-# Helper function for parallel processing
+### Helper function for parallel processing ###
 def process_record(record):
     """Wrapper function for parallel processing"""
     return process_sar_file(
@@ -30,6 +30,8 @@ def process_record(record):
         record['era5_wdir'],
         record.get('seed')
     )
+
+
 
 def process_radial_psd(record):
     """Process only the radial PSD for a SAR file"""
@@ -57,8 +59,6 @@ def process_radial_psd(record):
 def process_radial_wind(record):
     """Process only the radial wind for a SAR file"""
     try:
-        # print(f"Processing {record['sar_filepath']} for radial wind...")
-
         result = process_sar_file_v3(
             record['sar_filepath'],
             record['era5_wspd'],
