@@ -24,6 +24,9 @@ def clean_folder_against_csv(folder_path=folder_path, csv_path=csv_path):
     print(f'Matching files: {len(matching)}')
     print(f'Non-matching files: {len(non_matching)}')
 
+    for f in non_matching:
+        os.remove(os.path.join(folder_path, f))
+
 def main():
     clean_folder_against_csv()
 
